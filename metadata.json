@@ -1,0 +1,6 @@
+{
+  "name": "The Bloom Studio",
+  "description": "ระบบจองคิวบริการความงามและสปาพรีเมียม สไตล์มินิมอล Rose Gold แบบ Mobile-First",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
