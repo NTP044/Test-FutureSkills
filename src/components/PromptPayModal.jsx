@@ -13,7 +13,7 @@ export default function PromptPayModal({
 }) {
   const [qrUrl, setQrUrl] = useState('');
   const [copied, setCopied] = useState(false);
-  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerEmail, setCustomerEmail] = useState(bookingDetails?.customerEmail || '');
   const [slipFile, setSlipFile] = useState(null);
   const [slipBase64, setSlipBase64] = useState('');
   const [slipPreview, setSlipPreview] = useState('');
@@ -21,6 +21,12 @@ export default function PromptPayModal({
   const [isDragOver, setIsDragOver] = useState(false);
 
   const price = bookingDetails?.servicePrice || 0;
+
+  useEffect(() => {
+    if (bookingDetails?.customerEmail) {
+      setCustomerEmail(bookingDetails.customerEmail);
+    }
+  }, [bookingDetails?.customerEmail]);
 
   useEffect(() => {
     if (isOpen && price) {
