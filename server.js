@@ -959,29 +959,37 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
   });
 });
 
-// DELETE /api/bookings/:id - ยกเลิกการจอง
+// DELETE /api/bookings/:id - ยกเลิกหรือลบการจองออกจากระบบ & Google Sheet
 app.delete('/api/bookings/:id', async (req, res) => {
   const { id } = req.params;
+  const { permanent } = req.query;
   const bookingIndex = bookings.findIndex((b) => b.id === id);
 
   if (bookingIndex === -1) {
     return res.status(404).json({ success: false, error: 'ไม่พบรายการจองนี้ในระบบ' });
   }
 
-  bookings[bookingIndex].status = 'cancelled';
-  const updated = bookings[bookingIndex];
+  let updated;
+  if (permanent === 'true') {
+    updated = bookings.splice(bookingIndex, 1)[0];
+    if (gasConfig.webAppUrl) {
+      callGas('deleteBooking', { id }).catch(() => {});
+    }
+  } else {
+    bookings[bookingIndex].status = 'cancelled';
+    updated = bookings[bookingIndex];
+    if (gasConfig.webAppUrl) {
+      callGas('cancelBooking', { id }).catch(() => {});
+    }
+  }
 
   // Broadcast real-time update
-  broadcastEvent('BOOKING_CANCELLED', { booking: updated });
+  broadcastEvent('BOOKING_CANCELLED', { booking: updated, permanent: permanent === 'true' });
   broadcastEvent('AVAILABILITY_CHANGED', { staffId: updated.staffId, date: updated.date });
-
-  if (gasConfig.webAppUrl) {
-    callGas('cancelBooking', { id }).catch(() => {});
-  }
 
   res.json({
     success: true,
-    message: 'ยกเลิกการจองเรียบร้อยแล้ว',
+    message: permanent === 'true' ? 'ลบรายการจองออกจาก Google Sheet เรียบร้อยแล้ว' : 'ยกเลิกการจองเรียบร้อยแล้ว',
     booking: updated,
   });
 });

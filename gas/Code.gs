@@ -151,6 +151,11 @@ function doPost(e) {
       return createJsonResponse(handleCancelBooking(body.id));
     }
 
+    // 5.1 ลบแถวการจองออกจาก Google Sheet
+    if (action === 'deleteBooking') {
+      return createJsonResponse(handleDeleteBooking(body.id));
+    }
+
     // 6. สร้างชีตและโครงสร้างเริ่มต้น
     if (action === 'initSheet') {
       return createJsonResponse(setupSheets());
@@ -933,6 +938,24 @@ function handleUpdateBookingStatus(data) {
  */
 function handleCancelBooking(bookingId) {
   return handleUpdateBookingStatus({ id: bookingId, status: 'cancelled' });
+}
+
+/**
+ * ลบแถวการจองออกจาก Google Sheet โดยตรง
+ */
+function handleDeleteBooking(bookingId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_BOOKINGS);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(bookingId).trim()) {
+      sheet.deleteRow(i + 1);
+      return { success: true, message: 'Deleted booking row from Google Sheet' };
+    }
+  }
+  return { success: false, error: 'Booking ID not found: ' + bookingId };
 }
 
 /**
