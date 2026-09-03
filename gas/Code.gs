@@ -188,10 +188,95 @@ function doPost(e) {
 }
 
 /**
- * ฟังก์ชันสร้าง/ตรวจสอบชีตและใส่หัวคอลัมน์อัตโนมัติ (Auto Init & Seeding)
+ * Google Sheet Custom Top Menu (เมนูจัดการของ The Bloom Studio ใน Google Sheet)
+ */
+function onOpen() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('🌸 The Bloom Studio')
+      .addItem('⚡ สร้างโครงสร้างชีต & เชื่อม Google Workspace ทั้งหมด', 'setupSheets')
+      .addItem('📁 เปิดโฟลเดอร์ Google Drive (เก็บสลิป)', 'menuOpenDriveFolder')
+      .addItem('📅 เปิดดู Google Calendar', 'menuOpenCalendar')
+      .addSeparator()
+      .addItem('✉️ ทดสอบส่งอีเมลแจ้งเตือน Admin', 'menuTestAdminEmail')
+      .addToUi();
+  } catch (e) {
+    Logger.log('onOpen Error: ' + e.toString());
+  }
+}
+
+function menuOpenDriveFolder() {
+  var folderIterator = DriveApp.getFoldersByName(DRIVE_FOLDER_NAME);
+  var url = folderIterator.hasNext() ? folderIterator.next().getUrl() : 'https://drive.google.com';
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: sans-serif; text-align: center; padding: 20px;">' +
+    '<h3>📁 โฟลเดอร์สลิปบน Google Drive</h3>' +
+    '<p>โฟลเดอร์สำหรับจัดเก็บสลิปการโอนเงินของลูกค้าทั้งหมดอัตโนมัติ</p>' +
+    '<a href="' + url + '" target="_blank" style="display:inline-block; padding:10px 20px; background:#15803d; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">เปิด Google Drive</a>' +
+    '</div>'
+  ).setWidth(350).setHeight(180);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Google Drive Payment Slips');
+}
+
+function menuOpenCalendar() {
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: sans-serif; text-align: center; padding: 20px;">' +
+    '<h3>📅 Google Calendar</h3>' +
+    '<p>นัดหมายคิวจองทั้งหมดจะถูกเพิ่มลงใน Google Calendar อัตโนมัติ</p>' +
+    '<a href="https://calendar.google.com" target="_blank" style="display:inline-block; padding:10px 20px; background:#1d4ed8; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">เปิด Google Calendar</a>' +
+    '</div>'
+  ).setWidth(350).setHeight(180);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Google Calendar Management');
+}
+
+function menuTestAdminEmail() {
+  var adminEmail = getAdminEmail();
+  sendEmailSafely(
+    adminEmail,
+    '🔔 [ทดสอบระบบ] การแจ้งเตือน The Bloom Studio ทำงานปกติ',
+    '<div style="font-family:sans-serif; padding:20px; border:1px solid #e2e8f0; border-radius:12px;">' +
+    '<h3 style="color:#15803d;">ระบบแจ้งเตือนอีเมล The Bloom Studio ทำงานถูกต้อง 100%</h3>' +
+    '<p>อีเมลนี้เป็นการทดสอบส่งจาก Google Apps Script ไปยัง: <strong>' + adminEmail + '</strong></p>' +
+    '</div>'
+  );
+  SpreadsheetApp.getUi().alert('ส่งอีเมลทดสอบไปยัง ' + adminEmail + ' เรียบร้อยแล้ว กรุณาตรวจสอบกล่องจดหมาย');
+}
+
+/**
+ * ฟังก์ชันสร้าง/ตรวจสอบชีต และเชื่อมต่อบริการ Google Workspace ทั้งหมดอัตโนมัติ
+ * (Google Sheet 4 แท็บ + โฟลเดอร์ Google Drive + Google Calendar + Admin Email)
  */
 function setupSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 0. เชื่อมต่อและสร้างโฟลเดอร์ Google Drive สำหรับเก็บสลิป
+  var driveFolderUrl = '';
+  var driveFolderId = '';
+  try {
+    var folderIterator = DriveApp.getFoldersByName(DRIVE_FOLDER_NAME);
+    var folder;
+    if (folderIterator.hasNext()) {
+      folder = folderIterator.next();
+    } else {
+      folder = DriveApp.createFolder(DRIVE_FOLDER_NAME);
+    }
+    folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    driveFolderUrl = folder.getUrl();
+    driveFolderId = folder.getId();
+  } catch (driveErr) {
+    Logger.log('Drive folder init error: ' + driveErr.toString());
+  }
+
+  // 0.1 เชื่อมต่อ Google Calendar
+  var calendarId = '';
+  try {
+    var cal = CalendarApp.getDefaultCalendar();
+    if (cal) {
+      calendarId = cal.getId();
+    }
+  } catch (calErr) {
+    Logger.log('Calendar init error: ' + calErr.toString());
+  }
 
   // 1. Sheet: Bookings
   var bookingSheet = ss.getSheetByName(SHEET_BOOKINGS);
@@ -268,12 +353,17 @@ function setupSheets() {
     settingsSheet.appendRow(['PromptPayNumber', '0812345678', 'เบอร์พร้อมเพย์รับชำระเงิน']);
     settingsSheet.appendRow(['ShopName', 'The Bloom Studio', 'ชื่อร้าน']);
     settingsSheet.appendRow(['ServerWebhookUrl', '', 'URL เซิร์ฟเวอร์สำหรับรับการแจ้งเตือน Real-Time']);
+    settingsSheet.appendRow(['GoogleDriveFolderUrl', driveFolderUrl, 'ลิงก์โฟลเดอร์ Google Drive เก็บสลิป']);
+    settingsSheet.appendRow(['GoogleDriveFolderId', driveFolderId, 'รหัสโฟลเดอร์ Google Drive']);
+    settingsSheet.appendRow(['GoogleCalendarId', calendarId, 'รหัส Google Calendar ที่เชื่อมต่อ']);
   }
 
   return {
     success: true,
-    message: 'เริ่มต้นตาราง Google Sheet เรียบร้อยแล้ว (สร้าง 4 แท็บ พร้อมข้อมูลเริ่มต้น)',
+    message: 'เริ่มต้นระบบ Google Sheet และ Google Workspace ทั้งหมดเรียบร้อยแล้ว (4 แท็บ + Google Drive + Google Calendar + Email Notification)',
     sheetsCreated: [SHEET_BOOKINGS, SHEET_SERVICES, SHEET_STAFF, SHEET_SETTINGS],
+    driveFolderUrl: driveFolderUrl,
+    calendarId: calendarId,
   };
 }
 
