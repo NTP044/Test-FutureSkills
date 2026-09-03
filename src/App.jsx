@@ -52,8 +52,9 @@ import {
   logoutFromLine,
   getLineProfile,
   checkIsInClient,
-  getLiffContext,
   isUserLoggedIn,
+  getLiffContext,
+  sendBookingConfirmationFlex,
 } from './services/liffService.js';
 import LineIcon from './components/LineIcon.jsx';
 import LineAuthSection from './components/LineAuthSection.jsx';
@@ -218,14 +219,45 @@ export default function App() {
         setLiffReady(true);
 
         // If already logged in (e.g. from previous session or returning from LINE login redirect)
-        // fetch profile using liff.getProfile()
+        // fetch profile and automatically prefill saved phone, email, and name
         if (logged) {
           const profile = await getLineProfile();
           if (isMounted && profile) {
             setLineProfile(profile);
-            // Pre-fill the Customer Name field with LINE display name, keeping it editable
-            if (profile.displayName) {
-              setCustomerName((prev) => (prev ? prev : profile.displayName));
+
+            // 1. Check if user already has saved phone/email in LocalStorage
+            const savedUserData = localStorage.getItem(`bloom_user_${profile.userId}`);
+            if (savedUserData) {
+              try {
+                const parsed = JSON.parse(savedUserData);
+                if (parsed.name) setCustomerName(parsed.name);
+                if (parsed.phone) setCustomerPhone(parsed.phone);
+                if (parsed.email) setCustomerEmail(parsed.email);
+              } catch (e) {}
+            } else {
+              // 2. If first time on this browser, look up previous bookings from backend to auto-fill
+              getBookings({ lineUserId: profile.userId })
+                .then((prevBookings) => {
+                  if (Array.isArray(prevBookings) && prevBookings.length > 0) {
+                    const lastBooking = prevBookings[0];
+                    if (lastBooking.customerName) setCustomerName(lastBooking.customerName);
+                    if (lastBooking.customerPhone) setCustomerPhone(lastBooking.customerPhone);
+                    if (lastBooking.customerEmail) setCustomerEmail(lastBooking.customerEmail);
+                    localStorage.setItem(
+                      `bloom_user_${profile.userId}`,
+                      JSON.stringify({
+                        name: lastBooking.customerName,
+                        phone: lastBooking.customerPhone,
+                        email: lastBooking.customerEmail,
+                      })
+                    );
+                  } else if (profile.displayName) {
+                    setCustomerName(profile.displayName);
+                  }
+                })
+                .catch(() => {
+                  if (profile.displayName) setCustomerName(profile.displayName);
+                });
             }
           }
         }
@@ -524,6 +556,21 @@ export default function App() {
       const newBooking = result.booking || result;
       setConfirmedBooking(newBooking);
       setGoogleSyncStatus(result.googleSync || null);
+
+      // Save user phone & email for next session
+      if (lineProfile?.userId) {
+        localStorage.setItem(
+          `bloom_user_${lineProfile.userId}`,
+          JSON.stringify({
+            name: customerName.trim(),
+            phone: customerPhone.trim(),
+            email: customerEmail?.trim() || '',
+          })
+        );
+      }
+
+      // Send LINE In-Chat Booking Confirmation Flex Message if inside LINE App
+      sendBookingConfirmationFlex(newBooking).catch(() => {});
 
       // Background sync to Google Workspace (Sheet & Drive) if connected
       try {
