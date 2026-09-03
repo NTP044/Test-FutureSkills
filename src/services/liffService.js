@@ -109,25 +109,16 @@ export function loginWithLine(redirectUri) {
     if (!liff.isLoggedIn()) {
       const isIframe = typeof window !== 'undefined' && window.self !== window.top;
       if (isIframe) {
-        // access.line.me blocks iframe embedding via X-Frame-Options: DENY.
-        // Open the app in a new tab so login completes without iframe refusal.
         window.open(LIFF_URL, '_blank');
         return;
       }
 
-      let targetRedirect = redirectUri;
-
-      if (!targetRedirect && typeof window !== 'undefined') {
-        const currentUrl = window.location.href;
-        // If current origin matches registered endpoint URL, redirect back to current URL
-        if (currentUrl.startsWith(REGISTERED_ENDPOINT_URL)) {
-          targetRedirect = currentUrl;
-        } else if (REGISTERED_ENDPOINT_URL) {
-          // If in dev preview or different domain, redirect to registered endpoint to satisfy LINE OAuth requirement
-          targetRedirect = REGISTERED_ENDPOINT_URL;
-        }
+      if (liff.isInClient && liff.isInClient()) {
+        liff.login();
+        return;
       }
 
+      let targetRedirect = redirectUri || (typeof window !== 'undefined' ? window.location.href : '');
       if (targetRedirect) {
         liff.login({ redirectUri: targetRedirect });
       } else {
@@ -136,7 +127,6 @@ export function loginWithLine(redirectUri) {
     }
   } catch (err) {
     console.error('Error during liff.login():', err);
-    throw err;
   }
 }
 
