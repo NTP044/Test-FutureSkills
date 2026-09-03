@@ -1631,19 +1631,102 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
                 )}
               </div>
 
-              {/* GOOGLE APPS SCRIPT WEB APP INTEGRATION */}
-              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-stone-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <h4 className="font-bold text-stone-900 text-sm sm:text-base flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-stone-100 text-stone-700 text-xs flex items-center justify-center font-bold">GAS</span>
-                    <span>เชื่อมต่อด้วย Google Apps Script (Web App URL)</span>
-                  </h4>
-                  <span className="text-xs text-stone-400 font-medium">Webhook Real-Time</span>
+              {/* GOOGLE APPS SCRIPT WEB APP INTEGRATION & CODE.GS VIEWER */}
+              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-stone-200 shadow-sm space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-stone-100">
+                  <div>
+                    <h4 className="font-bold text-stone-900 text-base sm:text-lg flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-800 text-xs flex items-center justify-center font-bold">GAS</span>
+                      <span>โค้ด Google Apps Script (Code.gs) & การเชื่อมต่อ Web App</span>
+                    </h4>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      คัดลอกโค้ดด้านล่างไปวางใน Apps Script ของ Google Sheet เพื่อเปิดใช้งานระบบ Real-Time เต็มรูปแบบ
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleInitSheet}
+                    className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>⚡ สร้างตาราง 4 แท็บในชีตทันที (Init Sheet)</span>
+                  </button>
                 </div>
 
-                <form onSubmit={handleSaveGasConfig} className="space-y-3.5 pt-1">
+                {/* 4-Step Setup Guide */}
+                <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200">
+                  <h5 className="font-bold text-stone-900 text-xs mb-3 flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-stone-900 text-amber-300 text-[10px] flex items-center justify-center font-bold">i</span>
+                    <span>ขั้นตอนการเชื่อมต่อ Google Apps Script (ทำเพียงครั้งเดียว):</span>
+                  </h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs space-y-1">
+                      <div className="font-bold text-emerald-800 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-[10px]">1</span>
+                        <span>เปิด Google Sheet</span>
+                      </div>
+                      <p className="text-stone-500 text-[11px] leading-relaxed">
+                        เปิด Google Sheet เปล่า แล้วไปที่เมนู <strong>ส่วนขยาย (Extensions)</strong> &gt; <strong>Apps Script</strong>
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs space-y-1">
+                      <div className="font-bold text-emerald-800 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-[10px]">2</span>
+                        <span>วางโค้ด Code.gs</span>
+                      </div>
+                      <p className="text-stone-500 text-[11px] leading-relaxed">
+                        กดปุ่ม <strong>"คัดลอกโค้ดทั้งหมด"</strong> ด้านล่าง แล้วนำไปวางทับในไฟล์ <code>Code.gs</code> แล้วกดบันทึก (Ctrl+S)
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs space-y-1">
+                      <div className="font-bold text-emerald-800 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-[10px]">3</span>
+                        <span>Deploy เป็น Web App</span>
+                      </div>
+                      <p className="text-stone-500 text-[11px] leading-relaxed">
+                        กด <strong>Deploy</strong> &gt; <strong>New deployment</strong> &gt; เลือก <strong>Web app</strong> &gt; ผู้เข้าถึง: <strong>ทุกคน (Anyone)</strong>
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-stone-200 shadow-2xs space-y-1">
+                      <div className="font-bold text-emerald-800 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-[10px]">4</span>
+                        <span>บันทึก Web App URL</span>
+                      </div>
+                      <p className="text-stone-500 text-[11px] leading-relaxed">
+                        นำ <strong>Web App URL</strong> ที่ได้มาวางในช่องด้านล่าง แล้วกด <strong>"บันทึกการตั้งค่า"</strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Code Viewer Box */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                      <span>ไฟล์ gas/Code.gs (พร้อมฟังก์ชันครบ 4 แท็บ, Drive Slip, Calendar, Email, Webhook)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      className="px-3.5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1.5"
+                    >
+                      {codeCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{codeCopied ? 'คัดลอกโค้ดเรียบร้อยแล้ว!' : '📋 คัดลอกโค้ดทั้งหมด (Copy Code)'}</span>
+                    </button>
+                  </div>
+                  <div className="relative bg-stone-950 rounded-2xl border border-stone-800 p-4 font-mono text-[11px] text-stone-300 max-h-72 overflow-y-auto leading-relaxed select-all">
+                    <pre className="whitespace-pre-wrap">{gasCode || 'กำลังโหลดโค้ด Code.gs...'}</pre>
+                  </div>
+                </div>
+
+                {/* Configuration Form */}
+                <form onSubmit={handleSaveGasConfig} className="space-y-4 pt-2 border-t border-stone-100">
                   <div>
-                    <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    <label className="block text-xs font-bold text-stone-800 mb-1">
                       Web App URL (https://script.google.com/macros/s/.../exec)
                     </label>
                     <div className="flex flex-col sm:flex-row gap-2">
@@ -1682,10 +1765,10 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-stone-700 mb-1">
-                        อีเมลร้านสำหรับรับแจ้งเตือน
+                        อีเมลร้านสำหรับรับแจ้งเตือนคิวจอง
                       </label>
                       <input
                         type="email"
@@ -1725,6 +1808,16 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
                         <RefreshCw className={`w-3.5 h-3.5 ${isPushing ? 'animate-spin' : ''}`} />
                         <span>{isPushing ? 'กำลังส่ง...' : '🚀 ส่งข้อมูลขึ้นชีต (Push All)'}</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={handleManualSync}
+                        disabled={isSyncing}
+                        className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                        title="ดึงข้อมูลล่าสุดจาก Google Sheet"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>{isSyncing ? 'กำลังดึง...' : '📥 ดึงข้อมูลจากชีต (Pull)'}</span>
+                      </button>
                     </div>
                     {gasSaveMsg && (
                       <span className="text-xs text-emerald-600 font-semibold">{gasSaveMsg}</span>
@@ -1733,11 +1826,11 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
                 </form>
 
                 {/* Real-Time Webhook Information Box */}
-                <div className="mt-4 p-4 rounded-xl bg-stone-50 border border-stone-200 space-y-2">
+                <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                      <span>URL Webhook สำหรับ Real-Time Trigger</span>
+                      <span>URL Webhook สำหรับ Real-Time Trigger (onEdit)</span>
                     </span>
                     <button
                       type="button"
