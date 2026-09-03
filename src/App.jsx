@@ -158,6 +158,7 @@ export default function App() {
   const [selectedTime, setSelectedTime] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [specialRequest, setSpecialRequest] = useState('');
 
   // Availability state
@@ -297,6 +298,7 @@ export default function App() {
       setLineProfile(null);
       setCustomerName('');
       setCustomerPhone('');
+      setCustomerEmail('');
       setAllBookings([]);
       setShowMyBookings(false);
     } catch (err) {
