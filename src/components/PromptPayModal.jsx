@@ -268,41 +268,31 @@ export default function PromptPayModal({
         <div className="p-6 bg-stone-50 border-t border-stone-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
           <button
             type="button"
-            onClick={() => handleSubmit(true)}
+            onClick={onClose}
             disabled={isSubmitting}
-            className="w-full sm:w-auto px-4 py-2.5 text-xs text-stone-600 hover:text-stone-900 hover:bg-stone-200/60 rounded-xl transition-colors font-medium text-center"
+            className="w-full sm:w-auto px-5 py-2.5 text-sm text-stone-700 bg-white border border-stone-300 hover:bg-stone-100 rounded-xl transition-colors font-medium cursor-pointer"
           >
-            ชำระเงินที่หน้าร้านภายหลัง
+            ย้อนกลับ
           </button>
 
-          <div className="flex gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="flex-1 sm:flex-none px-4 py-2.5 text-sm text-stone-700 bg-white border border-stone-300 hover:bg-stone-100 rounded-xl transition-colors font-medium"
-            >
-              ย้อนกลับ
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmit(false)}
-              disabled={isSubmitting}
-              className="flex-1 sm:flex-none px-6 py-2.5 text-sm text-white bg-stone-900 hover:bg-stone-800 disabled:opacity-50 rounded-xl transition-all font-semibold shadow-md flex items-center justify-center gap-2"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>กำลังบันทึกและซิงค์...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>ยืนยันการจอง {slipPreview ? '(พร้อมแนบสลิป)' : ''}</span>
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => handleSubmit(false)}
+            disabled={isSubmitting || !slipBase64}
+            className="w-full sm:w-auto flex-1 px-6 py-2.5 text-sm text-white bg-stone-900 hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all font-semibold shadow-md flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {isSubmitting ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>กำลังยืนยันการจอง...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>{slipBase64 ? 'ยืนยันการจอง (พร้อมสลิปมัดจำ)' : 'กรุณาแนบสลิปโอนเงินมัดจำ'}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>

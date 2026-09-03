@@ -32,10 +32,24 @@
 var SHEET_BOOKINGS = 'Bookings';
 var SHEET_SERVICES = 'Services';
 var SHEET_STAFF = 'Staff';
+var SHEET_CUSTOMERS = 'Customers';
 var SHEET_SETTINGS = 'Settings';
 
 // ชื่อโฟลเดอร์ใน Google Drive สำหรับเก็บสลิปการโอน
 var DRIVE_FOLDER_NAME = 'The Bloom Studio - Payment Slips';
+
+/**
+ * หัวคอลัมน์ของแท็บ Customers ใน Google Sheet
+ */
+var CUSTOMER_COLUMNS = [
+  'Customer Phone',      // Col 1: เบอร์โทรศัพท์ลูกค้า
+  'Customer Name',       // Col 2: ชื่อ-นามสกุลลูกค้า
+  'Customer Email',      // Col 3: อีเมลลูกค้า
+  'Total Bookings',      // Col 4: จำนวนครั้งที่จอง
+  'Total Spent (THB)',   // Col 5: ยอดค่าบริการสะสม (บาท)
+  'Last Visit Date',     // Col 6: วันที่เข้าใช้บริการล่าสุด (YYYY-MM-DD)
+  'LINE User ID'         // Col 7: LINE User ID
+];
 
 /**
  * หัวคอลัมน์ของแท็บ Bookings ใน Google Sheet
@@ -339,7 +353,22 @@ function setupSheets() {
     });
   }
 
-  // 4. Sheet: Settings
+  // 4. Sheet: Customers (CRM)
+  var customerSheet = ss.getSheetByName(SHEET_CUSTOMERS);
+  if (!customerSheet) {
+    customerSheet = ss.insertSheet(SHEET_CUSTOMERS);
+  }
+  if (customerSheet.getLastRow() === 0) {
+    customerSheet.appendRow(CUSTOMER_COLUMNS);
+    var custHeaderRange = customerSheet.getRange(1, 1, 1, CUSTOMER_COLUMNS.length);
+    custHeaderRange.setBackground('#FDEBD0')
+      .setFontColor('#7E5109')
+      .setFontWeight('bold')
+      .setHorizontalAlignment('center');
+    customerSheet.setFrozenRows(1);
+  }
+
+  // 5. Sheet: Settings
   var settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
   if (!settingsSheet) {
     settingsSheet = ss.insertSheet(SHEET_SETTINGS);
@@ -360,8 +389,8 @@ function setupSheets() {
 
   return {
     success: true,
-    message: 'เริ่มต้นระบบ Google Sheet และ Google Workspace ทั้งหมดเรียบร้อยแล้ว (4 แท็บ + Google Drive + Google Calendar + Email Notification)',
-    sheetsCreated: [SHEET_BOOKINGS, SHEET_SERVICES, SHEET_STAFF, SHEET_SETTINGS],
+    message: 'เริ่มต้นระบบ Google Sheet และ Google Workspace ทั้งหมดเรียบร้อยแล้ว (5 แท็บ + Google Drive + Google Calendar + Email Notification)',
+    sheetsCreated: [SHEET_BOOKINGS, SHEET_SERVICES, SHEET_STAFF, SHEET_CUSTOMERS, SHEET_SETTINGS],
     driveFolderUrl: driveFolderUrl,
     calendarId: calendarId,
   };
@@ -470,6 +499,20 @@ function handleCreateBooking(data) {
   ];
 
   sheet.appendRow(rowData);
+
+  // อัปเดต/เพิ่มข้อมูลในแท็บ Customers (CRM Customer Profile)
+  try {
+    upsertCustomerInSheet({
+      customerPhone: customerPhone,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      servicePrice: servicePrice,
+      date: date,
+      lineUserId: lineUserId
+    });
+  } catch (custErr) {
+    Logger.log('Customer Upsert Error: ' + custErr.toString());
+  }
 
   // ส่ง Email แจ้งเตือน Admin ทันที (Trigger ภายใน doPost หลังบันทึกสำเร็จ)
   try {
@@ -1290,6 +1333,73 @@ function onEdit(e) {
     UrlFetchApp.fetch(webhookUrl, options);
   } catch (err) {
     Logger.log('onEdit Webhook Error: ' + err.toString());
+  }
+}
+
+/**
+ * Upsert ข้อมูลลูกค้าลงในแท็บ Customers (CRM)
+ */
+function upsertCustomerInSheet(data) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var custSheet = ss.getSheetByName(SHEET_CUSTOMERS);
+    if (!custSheet) {
+      custSheet = ss.insertSheet(SHEET_CUSTOMERS);
+      custSheet.appendRow(CUSTOMER_COLUMNS);
+      custSheet.getRange(1, 1, 1, CUSTOMER_COLUMNS.length)
+        .setBackground('#FDEBD0')
+        .setFontColor('#7E5109')
+        .setFontWeight('bold')
+        .setHorizontalAlignment('center');
+      custSheet.setFrozenRows(1);
+    }
+
+    var phone = String(data.customerPhone || '').replace(/[\s-]/g, '');
+    var name = String(data.customerName || '').trim();
+    var email = String(data.customerEmail || '').trim();
+    var price = Number(data.servicePrice) || 0;
+    var visitDate = String(data.date || new Date().toISOString().split('T')[0]);
+    var lineUserId = String(data.lineUserId || '');
+
+    if (!phone && !lineUserId) return;
+
+    var lastRow = custSheet.getLastRow();
+    var foundRow = -1;
+
+    if (lastRow > 1) {
+      var dataRange = custSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+      for (var i = 0; i < dataRange.length; i++) {
+        var rowPhone = String(dataRange[i][0] || '').replace(/[\s-]/g, '');
+        var rowLineId = String(dataRange[i][6] || '');
+        if ((phone && rowPhone === phone) || (lineUserId && rowLineId === lineUserId)) {
+          foundRow = i + 2;
+          var currentBookings = Number(dataRange[i][3]) || 0;
+          var currentSpent = Number(dataRange[i][4]) || 0;
+
+          if (name) custSheet.getRange(foundRow, 2).setValue(name);
+          if (email) custSheet.getRange(foundRow, 3).setValue(email);
+          custSheet.getRange(foundRow, 4).setValue(currentBookings + 1);
+          custSheet.getRange(foundRow, 5).setValue(currentSpent + price);
+          custSheet.getRange(foundRow, 6).setValue(visitDate);
+          if (lineUserId) custSheet.getRange(foundRow, 7).setValue(lineUserId);
+          break;
+        }
+      }
+    }
+
+    if (foundRow === -1) {
+      custSheet.appendRow([
+        phone,
+        name,
+        email,
+        1,
+        price,
+        visitDate,
+        lineUserId
+      ]);
+    }
+  } catch (err) {
+    Logger.log('upsertCustomerInSheet Error: ' + err.toString());
   }
 }
 
