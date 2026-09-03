@@ -1506,7 +1506,10 @@ export default function App() {
       {/* PromptPay & Slip Upload Modal */}
       <PromptPayModal
         isOpen={showPromptPayModal}
-        onClose={() => setShowPromptPayModal(false)}
+        onClose={() => {
+          setShowPromptPayModal(false);
+          setErrorMessage('');
+        }}
         bookingDetails={{
           serviceName: selectedService?.name,
           servicePrice: selectedService?.price,
@@ -1515,9 +1518,11 @@ export default function App() {
           time: selectedTime,
           customerName,
           customerPhone,
+          customerEmail,
         }}
         onConfirmBooking={handleFinalBookingSubmit}
         isSubmitting={isSubmitting}
+        errorMessage={errorMessage}
       />
 
       {/* Admin Login Modal (PIN Pad) */}

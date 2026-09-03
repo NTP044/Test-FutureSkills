@@ -8,6 +8,7 @@ export default function PromptPayModal({
   bookingDetails,
   onConfirmBooking,
   isSubmitting,
+  errorMessage = '',
   promptpayNumber = '0812345678',
   promptpayName = 'The Bloom Studio',
 }) {
@@ -109,7 +110,7 @@ export default function PromptPayModal({
         <div className="bg-gradient-to-r from-stone-900 to-stone-800 text-white p-6 relative">
           <button
             onClick={onClose}
-            className="absolute top-5 right-5 p-2 text-stone-400 hover:text-white rounded-full hover:bg-stone-700/50 transition-colors"
+            className="absolute top-5 right-5 p-2 text-stone-400 hover:text-white rounded-full hover:bg-stone-700/50 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -124,6 +125,16 @@ export default function PromptPayModal({
         </div>
 
         <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          {/* Submission error if any */}
+          {errorMessage && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-xs text-rose-700 font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p>{errorMessage}</p>
+              </div>
+            </div>
+          )}
+
           {/* QR Code Card */}
           <div className="bg-stone-50 border border-stone-200 rounded-2xl p-5 text-center flex flex-col items-center">
             <div className="bg-white p-3 rounded-2xl shadow-sm border border-stone-100 mb-3">
