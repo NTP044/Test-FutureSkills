@@ -12,6 +12,8 @@ app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
+const DB_FILE = path.join(process.cwd(), 'data', 'database.json');
+
 // Google Apps Script and Store Configuration
 let gasConfig = {
   webAppUrl: process.env.GAS_WEB_APP_URL || '',
@@ -35,6 +37,49 @@ let workspaceConfig = {
   lastSyncAt: null,
   status: 'ready',
 };
+
+/**
+ * Persist in-memory database to disk so all devices and restarts share exact same data
+ */
+function saveDatabase() {
+  try {
+    const dir = path.dirname(DB_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const payload = {
+      gasConfig,
+      workspaceConfig,
+      services,
+      staff,
+      bookings,
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[DB Save Warning]', err.message);
+  }
+}
+
+/**
+ * Load database from disk on startup
+ */
+function loadDatabase() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data.gasConfig) gasConfig = { ...gasConfig, ...data.gasConfig };
+      if (data.workspaceConfig) workspaceConfig = { ...workspaceConfig, ...data.workspaceConfig };
+      if (Array.isArray(data.services) && data.services.length > 0) services = data.services;
+      if (Array.isArray(data.staff) && data.staff.length > 0) staff = data.staff;
+      if (Array.isArray(data.bookings) && data.bookings.length > 0) bookings = data.bookings;
+      console.log('✅ Persistent Database loaded from', DB_FILE);
+    }
+  } catch (err) {
+    console.warn('[DB Load Warning]', err.message);
+  }
+}
 
 // In-Memory Data Store (Services)
 let services = [
@@ -323,6 +368,7 @@ async function syncFromGas(silent = false) {
       gasConfig.lastSyncAt = new Date().toISOString();
       gasConfig.syncStatus = 'synced';
       gasConfig.lastSyncError = null;
+      saveDatabase();
 
       if (!silent || changed) {
         broadcastEvent('SHEET_SYNCED', {
@@ -343,6 +389,7 @@ async function syncFromGas(silent = false) {
         bookings = [...bRes.data, ...localRecent];
         gasConfig.lastSyncAt = new Date().toISOString();
         gasConfig.syncStatus = 'synced';
+        saveDatabase();
         broadcastEvent('SHEET_SYNCED', { lastSyncAt: gasConfig.lastSyncAt, totalBookings: bookings.length });
         return { success: true, count: bookings.length };
       }
@@ -450,6 +497,7 @@ app.post('/api/services', (req, res) => {
   };
 
   services.push(newService);
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('SERVICES_UPDATED', { services, action: 'add', item: newService });
@@ -480,6 +528,7 @@ app.put('/api/services/:id', (req, res) => {
     description: description !== undefined ? String(description).trim() : services[idx].description,
     icon: icon || services[idx].icon,
   };
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('SERVICES_UPDATED', { services, action: 'update', item: services[idx] });
@@ -501,6 +550,7 @@ app.delete('/api/services/:id', (req, res) => {
   }
 
   const removed = services.splice(idx, 1)[0];
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('SERVICES_UPDATED', { services, action: 'delete', id });
@@ -543,6 +593,7 @@ app.post('/api/staff', (req, res) => {
   };
 
   staff.push(newStaff);
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('STAFF_UPDATED', { staff, action: 'add', item: newStaff });
@@ -573,6 +624,7 @@ app.put('/api/staff/:id', (req, res) => {
     services: Array.isArray(stServices) ? stServices : staff[idx].services,
     bio: bio !== undefined ? String(bio).trim() : staff[idx].bio,
   };
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('STAFF_UPDATED', { staff, action: 'update', item: staff[idx] });
@@ -593,6 +645,7 @@ app.delete('/api/staff/:id', (req, res) => {
   }
 
   const removed = staff.splice(idx, 1)[0];
+  saveDatabase();
 
   // Broadcast real-time update
   broadcastEvent('STAFF_UPDATED', { staff, action: 'delete', id });
@@ -735,6 +788,7 @@ app.post('/api/bookings', async (req, res) => {
 
   // Add to local memory first for instant response
   bookings.push(newBooking);
+  saveDatabase();
 
   // Broadcast Real-time event immediately so all connected clients see slot booked & admin sees queue
   broadcastEvent('BOOKING_CREATED', { booking: newBooking });
@@ -759,6 +813,7 @@ app.post('/api/bookings', async (req, res) => {
           if (gasResult.booking.calendarEventId) {
             bookings[idx].calendarEventId = gasResult.booking.calendarEventId;
           }
+          saveDatabase();
           broadcastEvent('BOOKING_UPDATED', { booking: bookings[idx] });
         }
       }
@@ -862,6 +917,7 @@ app.put('/api/bookings/:id/reschedule', async (req, res) => {
     booking.staffName = targetStaff.name;
     booking.staffAvatar = targetStaff.avatar;
   }
+  saveDatabase();
 
   // Broadcast Real-time event
   broadcastEvent('BOOKING_UPDATED', { booking, action: 'reschedule' });
@@ -901,6 +957,7 @@ app.post('/api/bookings/:id/slip', async (req, res) => {
 
   booking.paymentStatus = 'paid_slip';
   booking.slipUrl = 'Processing Google Drive Upload...';
+  saveDatabase();
 
   // Broadcast immediate update
   broadcastEvent('BOOKING_UPDATED', { booking, action: 'slip_uploaded' });
@@ -916,6 +973,7 @@ app.post('/api/bookings/:id/slip', async (req, res) => {
 
       if (gasResult && gasResult.success && gasResult.slipUrl) {
         booking.slipUrl = gasResult.slipUrl;
+        saveDatabase();
         broadcastEvent('BOOKING_UPDATED', { booking, action: 'slip_drive_saved' });
       }
     } catch (gasErr) {
@@ -942,6 +1000,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
 
   if (status) booking.status = status;
   if (paymentStatus) booking.paymentStatus = paymentStatus;
+  saveDatabase();
 
   // Broadcast real-time update to all clients
   broadcastEvent('BOOKING_UPDATED', { booking });
@@ -972,12 +1031,14 @@ app.delete('/api/bookings/:id', async (req, res) => {
   let updated;
   if (permanent === 'true') {
     updated = bookings.splice(bookingIndex, 1)[0];
+    saveDatabase();
     if (gasConfig.webAppUrl) {
       callGas('deleteBooking', { id }).catch(() => {});
     }
   } else {
     bookings[bookingIndex].status = 'cancelled';
     updated = bookings[bookingIndex];
+    saveDatabase();
     if (gasConfig.webAppUrl) {
       callGas('cancelBooking', { id }).catch(() => {});
     }
@@ -1125,6 +1186,8 @@ app.post('/api/gas/config', async (req, res) => {
   if (promptpayName !== undefined) gasConfig.promptpayName = String(promptpayName).trim();
   if (autoSync !== undefined) gasConfig.autoSync = Boolean(autoSync);
   if (adminPin && String(adminPin).length >= 4) gasConfig.adminPin = String(adminPin).trim();
+
+  saveDatabase();
 
   // If new webAppUrl set, trigger initial sync
   if (webAppUrl) {
@@ -1306,6 +1369,9 @@ app.get('/api/health', (req, res) => {
 
 // ================= VITE INTEGRATION =================
 async function startServer() {
+  // Load persistent database from disk on startup
+  loadDatabase();
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
