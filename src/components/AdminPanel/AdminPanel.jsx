@@ -968,8 +968,10 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
               {bookingsViewMode === 'calendar' ? (
                 <CalendarView
                   bookings={bookings}
+                  staff={staff}
                   onViewSlip={(b) => setSelectedSlipBooking(b)}
                   onUpdateStatus={handleStatusChange}
+                  onBookingChanged={loadAllAdminData}
                 />
               ) : (
                 <>

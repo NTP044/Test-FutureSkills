@@ -798,9 +798,135 @@ app.get('/api/bookings', (req, res) => {
     result = result.filter((b) => b.status === status);
   }
 
+  // Calculate anti-collision warning flag for each booking
+  const enrichedBookings = result.map((b) => {
+    if (b.status === 'cancelled') return { ...b, hasConflict: false };
+    const hasConflict = bookings.some(
+      (other) =>
+        other.id !== b.id &&
+        other.status !== 'cancelled' &&
+        other.staffId === b.staffId &&
+        other.date === b.date &&
+        other.time === b.time
+    );
+    return { ...b, hasConflict };
+  });
+
   res.json({
     success: true,
-    data: [...result].reverse(),
+    data: [...enrichedBookings].reverse(),
+  });
+});
+
+// PUT /api/bookings/:id/reschedule - เลื่อนคิวการจอง (Reschedule with Anti-Collision Check)
+app.put('/api/bookings/:id/reschedule', async (req, res) => {
+  const { id } = req.params;
+  const { date, time, staffId } = req.body;
+
+  const booking = bookings.find((b) => b.id === id);
+  if (!booking) {
+    return res.status(404).json({ success: false, error: 'ไม่พบรายการจองนี้' });
+  }
+
+  if (!date || !time) {
+    return res.status(400).json({ success: false, error: 'กรุณาระบุวันที่และเวลาใหม่' });
+  }
+
+  const targetStaffId = staffId ? String(staffId) : booking.staffId;
+  const targetStaff = staff.find((s) => s.id === targetStaffId);
+
+  // Anti-Collision Check: Check if slot is already booked for this staff
+  const isConflict = bookings.some(
+    (b) =>
+      b.id !== id &&
+      b.staffId === targetStaffId &&
+      b.date === String(date) &&
+      b.time === String(time) &&
+      b.status !== 'cancelled'
+  );
+
+  if (isConflict) {
+    return res.status(409).json({
+      success: false,
+      error: `ขออภัย ช่าง ${targetStaff ? targetStaff.name : 'ที่เลือก'} มีคิวการจองในวันที่ ${date} เวลา ${time} น. แล้ว (คิวซ้ำซ้อน)`,
+    });
+  }
+
+  const oldStaffId = booking.staffId;
+  const oldDate = booking.date;
+
+  booking.date = String(date);
+  booking.time = String(time);
+  if (targetStaff) {
+    booking.staffId = targetStaff.id;
+    booking.staffName = targetStaff.name;
+    booking.staffAvatar = targetStaff.avatar;
+  }
+
+  // Broadcast Real-time event
+  broadcastEvent('BOOKING_UPDATED', { booking, action: 'reschedule' });
+  broadcastEvent('AVAILABILITY_CHANGED', { staffId: oldStaffId, date: oldDate });
+  broadcastEvent('AVAILABILITY_CHANGED', { staffId: booking.staffId, date: booking.date });
+
+  // Sync to Google Sheet via Apps Script
+  if (gasConfig.webAppUrl) {
+    callGas('rescheduleBooking', {
+      id,
+      date: booking.date,
+      time: booking.time,
+      staffName: booking.staffName,
+    }).catch(() => {});
+  }
+
+  res.json({
+    success: true,
+    message: 'เลื่อนคิวการจองสำเร็จ',
+    booking,
+  });
+});
+
+// POST /api/bookings/:id/slip - แนบสลิปการโอนเงิน (Upload Slip & Save to Google Drive + Email Alert)
+app.post('/api/bookings/:id/slip', async (req, res) => {
+  const { id } = req.params;
+  const { slipBase64, customerName } = req.body;
+
+  const booking = bookings.find((b) => b.id === id);
+  if (!booking) {
+    return res.status(404).json({ success: false, error: 'ไม่พบรายการจองนี้' });
+  }
+
+  if (!slipBase64) {
+    return res.status(400).json({ success: false, error: 'กรุณาแนบไฟล์สลิป (Base64)' });
+  }
+
+  booking.paymentStatus = 'paid_slip';
+  booking.slipUrl = 'Processing Google Drive Upload...';
+
+  // Broadcast immediate update
+  broadcastEvent('BOOKING_UPDATED', { booking, action: 'slip_uploaded' });
+
+  // Forward to Google Apps Script for Drive storage & Admin Email notification
+  if (gasConfig.webAppUrl) {
+    try {
+      const gasResult = await callGas('uploadSlip', {
+        bookingId: id,
+        slipBase64,
+        customerName: customerName || booking.customerName,
+      });
+
+      if (gasResult && gasResult.success && gasResult.slipUrl) {
+        booking.slipUrl = gasResult.slipUrl;
+        broadcastEvent('BOOKING_UPDATED', { booking, action: 'slip_drive_saved' });
+      }
+    } catch (gasErr) {
+      console.warn('Failed to forward slip to Google Apps Script:', gasErr);
+    }
+  }
+
+  res.json({
+    success: true,
+    message: 'ส่งสลิปเรียบร้อย รอการตรวจสอบ',
+    booking,
   });
 });
 

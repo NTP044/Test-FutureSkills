@@ -219,6 +219,42 @@ export async function cancelBooking(id) {
 export const deleteBooking = cancelBooking;
 
 /**
+ * เลื่อนคิวการจอง (Reschedule Booking)
+ * @param {string} id - รหัสการจอง
+ * @param {Object} scheduleData - { date, time, staffId }
+ */
+export async function rescheduleBooking(id, scheduleData) {
+  const response = await fetch(`${API_BASE}/bookings/${encodeURIComponent(id)}/reschedule`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(scheduleData),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'ไม่สามารถเลื่อนคิวได้ (อาจมีคิวซ้ำซ้อน)');
+  }
+  return data.booking;
+}
+
+/**
+ * แนบสลิปการโอนเงิน (Upload Slip)
+ * @param {string} id - รหัสการจอง
+ * @param {Object} slipData - { slipBase64, customerName }
+ */
+export async function uploadBookingSlip(id, slipData) {
+  const response = await fetch(`${API_BASE}/bookings/${encodeURIComponent(id)}/slip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(slipData),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'ไม่สามารถอัปโหลดสลิปได้');
+  }
+  return data.booking;
+}
+
+/**
  * ข้อมูล Dashboard Overview สำหรับแอดมิน
  */
 export async function getAdminOverview() {
