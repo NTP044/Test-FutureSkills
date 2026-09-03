@@ -783,6 +783,7 @@ app.post('/api/bookings', async (req, res) => {
     slipUrl: slipUrl || (slipBase64 ? 'Processing Google Drive Upload...' : ''),
     calendarEventId: '',
     createdAt: new Date().toISOString(),
+    createdAtMs: Date.now(),
     status: 'pending',
   };
 

@@ -646,6 +646,27 @@ export default function CalendarView({
                   </div>
                 )}
 
+                {/* Millisecond precision booking timestamp */}
+                <div className="p-2.5 bg-stone-100/90 rounded-xl text-[11px] text-stone-600 flex items-center justify-between border border-stone-200/60">
+                  <span className="font-medium">⏱️ บันทึกระบบเมื่อ (ระดับมิลลิวินาที):</span>
+                  <span className="font-mono font-bold text-stone-900">
+                    {(() => {
+                      try {
+                        const d = selectedBooking.createdAtMs
+                          ? new Date(selectedBooking.createdAtMs)
+                          : new Date(selectedBooking.createdAt);
+                        const hours = String(d.getHours()).padStart(2, '0');
+                        const mins = String(d.getMinutes()).padStart(2, '0');
+                        const secs = String(d.getSeconds()).padStart(2, '0');
+                        const ms = String(d.getMilliseconds()).padStart(3, '0');
+                        return `${hours}:${mins}:${secs}.${ms} น.`;
+                      } catch {
+                        return selectedBooking.createdAt;
+                      }
+                    })()}
+                  </span>
+                </div>
+
                 {/* Actions: View Slip, Reschedule, Change Status */}
                 <div className="pt-2 border-t border-stone-100 flex flex-wrap gap-2 justify-between items-center">
                   <div className="flex gap-2">
