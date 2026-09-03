@@ -21,6 +21,8 @@ let gasConfig = {
   adminPin: '1234',
   autoSync: true,
   lastSyncAt: null,
+  syncStatus: 'idle', // 'idle' | 'syncing' | 'synced' | 'error'
+  lastSyncError: null,
 };
 
 // Google Workspace Direct Cloud Integration (Sheets API, Drive API, Calendar API)
@@ -205,6 +207,42 @@ let bookings = [
   },
 ];
 
+// ================= REAL-TIME SERVER-SENT EVENTS (SSE) ENGINE =================
+const sseClients = new Set();
+
+/**
+ * Broadcast an event to all connected Frontend and Admin clients in real-time
+ */
+function broadcastEvent(type, data = {}) {
+  const payload = JSON.stringify({
+    type,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+
+  const message = `event: message\ndata: ${payload}\n\n`;
+
+  sseClients.forEach((client) => {
+    try {
+      client.write(message);
+    } catch (err) {
+      console.warn('[SSE Broadcast Warning]', err.message);
+      sseClients.delete(client);
+    }
+  });
+}
+
+// SSE Heartbeat keep-alive every 20 seconds
+setInterval(() => {
+  sseClients.forEach((client) => {
+    try {
+      client.write(':keepalive\n\n');
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  });
+}, 20000);
+
 // Helper: Call Google Apps Script Web App
 async function callGas(action, data = {}, method = 'POST') {
   if (!gasConfig.webAppUrl) {
@@ -240,6 +278,153 @@ async function callGas(action, data = {}, method = 'POST') {
   }
 }
 
+/**
+ * Sync from Google Sheet and update in-memory stores
+ */
+async function syncFromGas(silent = false) {
+  if (!gasConfig.webAppUrl) return { success: false, reason: 'NO_GAS_URL' };
+
+  gasConfig.syncStatus = 'syncing';
+  try {
+    const result = await callGas('getAllData', {}, 'GET');
+    if (result && result.success && result.data) {
+      const { services: sheetServices, staff: sheetStaff, bookings: sheetBookings, settings: sheetSettings } = result.data;
+
+      let changed = false;
+
+      // 1. Sync Services if available
+      if (Array.isArray(sheetServices) && sheetServices.length > 0) {
+        services = sheetServices;
+        changed = true;
+      }
+
+      // 2. Sync Staff if available
+      if (Array.isArray(sheetStaff) && sheetStaff.length > 0) {
+        staff = sheetStaff;
+        changed = true;
+      }
+
+      // 3. Sync Bookings
+      if (Array.isArray(sheetBookings) && sheetBookings.length > 0) {
+        // Merge with local newly created bookings if any
+        const sheetIds = new Set(sheetBookings.map((b) => b.id));
+        const localRecent = bookings.filter((b) => !sheetIds.has(b.id));
+        bookings = [...sheetBookings, ...localRecent];
+        changed = true;
+      }
+
+      // 4. Sync Settings
+      if (sheetSettings) {
+        if (sheetSettings.PromptPayNumber) gasConfig.promptpayPhone = sheetSettings.PromptPayNumber;
+        if (sheetSettings.ShopName) gasConfig.promptpayName = sheetSettings.ShopName;
+        if (sheetSettings.OwnerEmail) gasConfig.ownerEmail = sheetSettings.OwnerEmail;
+      }
+
+      gasConfig.lastSyncAt = new Date().toISOString();
+      gasConfig.syncStatus = 'synced';
+      gasConfig.lastSyncError = null;
+
+      if (!silent || changed) {
+        broadcastEvent('SHEET_SYNCED', {
+          lastSyncAt: gasConfig.lastSyncAt,
+          totalBookings: bookings.length,
+          totalServices: services.length,
+          totalStaff: staff.length,
+        });
+      }
+
+      return { success: true, count: bookings.length };
+    } else {
+      // Fallback: Try getBookings only
+      const bRes = await callGas('getBookings', {}, 'GET');
+      if (bRes && bRes.success && Array.isArray(bRes.data)) {
+        const sheetIds = new Set(bRes.data.map((b) => b.id));
+        const localRecent = bookings.filter((b) => !sheetIds.has(b.id));
+        bookings = [...bRes.data, ...localRecent];
+        gasConfig.lastSyncAt = new Date().toISOString();
+        gasConfig.syncStatus = 'synced';
+        broadcastEvent('SHEET_SYNCED', { lastSyncAt: gasConfig.lastSyncAt, totalBookings: bookings.length });
+        return { success: true, count: bookings.length };
+      }
+      gasConfig.syncStatus = 'error';
+      gasConfig.lastSyncError = 'Invalid response from Google Sheet';
+      return { success: false, error: 'Invalid response from Google Sheet' };
+    }
+  } catch (err) {
+    gasConfig.syncStatus = 'error';
+    gasConfig.lastSyncError = err.message;
+    console.warn('[Auto-sync from GAS failed]', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+// Background poller: Checks Google Sheets every 15 seconds for external edits
+setInterval(() => {
+  if (gasConfig.webAppUrl && gasConfig.autoSync) {
+    syncFromGas(true).catch(() => {});
+  }
+}, 15000);
+
+// ================= REAL-TIME STREAM ROUTE =================
+
+// GET /api/realtime/stream - SSE connection for real-time bi-directional events
+app.get('/api/realtime/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  sseClients.add(res);
+
+  // Send initial connection event with current state
+  const initPayload = JSON.stringify({
+    type: 'CONNECTED',
+    data: {
+      clientCount: sseClients.size,
+      gasConnected: Boolean(gasConfig.webAppUrl),
+      lastSyncAt: gasConfig.lastSyncAt,
+      servicesCount: services.length,
+      staffCount: staff.length,
+      bookingsCount: bookings.length,
+    },
+    timestamp: new Date().toISOString(),
+  });
+  res.write(`event: message\ndata: ${initPayload}\n\n`);
+
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
+// GET /api/realtime/status - Check real-time engine status
+app.get('/api/realtime/status', (req, res) => {
+  res.json({
+    success: true,
+    connectedClients: sseClients.size,
+    gasConfig: {
+      connected: Boolean(gasConfig.webAppUrl),
+      autoSync: gasConfig.autoSync,
+      lastSyncAt: gasConfig.lastSyncAt,
+      syncStatus: gasConfig.syncStatus,
+      lastSyncError: gasConfig.lastSyncError,
+    },
+  });
+});
+
+// POST /api/gas/webhook - Webhook triggered by Google Sheet onEdit trigger
+app.post('/api/gas/webhook', async (req, res) => {
+  console.log('[Google Sheet Webhook Received]', req.body);
+  const result = await syncFromGas(false);
+
+  broadcastEvent('WEBHOOK_TRIGGERED', {
+    event: req.body.event || 'SHEET_EDITED',
+    sheetName: req.body.sheetName,
+    syncResult: result,
+  });
+
+  res.json({ success: true, message: 'Webhook processed & Real-Time sync broadcasted', result });
+});
+
 // ================= API ROUTES =================
 
 // GET /api/services
@@ -265,6 +450,9 @@ app.post('/api/services', (req, res) => {
   };
 
   services.push(newService);
+
+  // Broadcast real-time update
+  broadcastEvent('SERVICES_UPDATED', { services, action: 'add', item: newService });
 
   // Sync to GAS in background
   if (gasConfig.webAppUrl) {
@@ -293,6 +481,9 @@ app.put('/api/services/:id', (req, res) => {
     icon: icon || services[idx].icon,
   };
 
+  // Broadcast real-time update
+  broadcastEvent('SERVICES_UPDATED', { services, action: 'update', item: services[idx] });
+
   // Sync to GAS
   if (gasConfig.webAppUrl) {
     callGas('manageService', { subAction: 'update', service: services[idx] }).catch(() => {});
@@ -310,6 +501,10 @@ app.delete('/api/services/:id', (req, res) => {
   }
 
   const removed = services.splice(idx, 1)[0];
+
+  // Broadcast real-time update
+  broadcastEvent('SERVICES_UPDATED', { services, action: 'delete', id });
+
   if (gasConfig.webAppUrl) {
     callGas('manageService', { subAction: 'delete', id }).catch(() => {});
   }
@@ -349,6 +544,9 @@ app.post('/api/staff', (req, res) => {
 
   staff.push(newStaff);
 
+  // Broadcast real-time update
+  broadcastEvent('STAFF_UPDATED', { staff, action: 'add', item: newStaff });
+
   if (gasConfig.webAppUrl) {
     callGas('manageStaff', { subAction: 'add', staff: newStaff }).catch(() => {});
   }
@@ -376,6 +574,9 @@ app.put('/api/staff/:id', (req, res) => {
     bio: bio !== undefined ? String(bio).trim() : staff[idx].bio,
   };
 
+  // Broadcast real-time update
+  broadcastEvent('STAFF_UPDATED', { staff, action: 'update', item: staff[idx] });
+
   if (gasConfig.webAppUrl) {
     callGas('manageStaff', { subAction: 'update', staff: staff[idx] }).catch(() => {});
   }
@@ -392,6 +593,10 @@ app.delete('/api/staff/:id', (req, res) => {
   }
 
   const removed = staff.splice(idx, 1)[0];
+
+  // Broadcast real-time update
+  broadcastEvent('STAFF_UPDATED', { staff, action: 'delete', id });
+
   if (gasConfig.webAppUrl) {
     callGas('manageStaff', { subAction: 'delete', id }).catch(() => {});
   }
@@ -439,7 +644,7 @@ app.get('/api/availability', (req, res) => {
   });
 });
 
-// POST /api/bookings - สร้างการจอง บันทึกลง Google Sheet / Drive / Calendar / Email
+// POST /api/bookings - สร้างการจอง บันทึกลง Google Sheet / Drive / Calendar / Email + Broadcast Real-time
 app.post('/api/bookings', async (req, res) => {
   const {
     serviceId,
@@ -531,6 +736,10 @@ app.post('/api/bookings', async (req, res) => {
   // Add to local memory first for instant response
   bookings.push(newBooking);
 
+  // Broadcast Real-time event immediately so all connected clients see slot booked & admin sees queue
+  broadcastEvent('BOOKING_CREATED', { booking: newBooking });
+  broadcastEvent('AVAILABILITY_CHANGED', { staffId: selectedStaff.id, date });
+
   // Send to Google Apps Script Web App (Sheets + Drive + Calendar + Email)
   let gasResult = null;
   if (gasConfig.webAppUrl) {
@@ -550,6 +759,7 @@ app.post('/api/bookings', async (req, res) => {
           if (gasResult.booking.calendarEventId) {
             bookings[idx].calendarEventId = gasResult.booking.calendarEventId;
           }
+          broadcastEvent('BOOKING_UPDATED', { booking: bookings[idx] });
         }
       }
     } catch (gasErr) {
@@ -607,6 +817,10 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
   if (status) booking.status = status;
   if (paymentStatus) booking.paymentStatus = paymentStatus;
 
+  // Broadcast real-time update to all clients
+  broadcastEvent('BOOKING_UPDATED', { booking });
+  broadcastEvent('AVAILABILITY_CHANGED', { staffId: booking.staffId, date: booking.date });
+
   // Sync to Google Sheet
   if (gasConfig.webAppUrl) {
     callGas('updateBookingStatus', { id, status: booking.status, paymentStatus: booking.paymentStatus }).catch(() => {});
@@ -629,6 +843,11 @@ app.delete('/api/bookings/:id', async (req, res) => {
   }
 
   bookings[bookingIndex].status = 'cancelled';
+  const updated = bookings[bookingIndex];
+
+  // Broadcast real-time update
+  broadcastEvent('BOOKING_CANCELLED', { booking: updated });
+  broadcastEvent('AVAILABILITY_CHANGED', { staffId: updated.staffId, date: updated.date });
 
   if (gasConfig.webAppUrl) {
     callGas('cancelBooking', { id }).catch(() => {});
@@ -637,7 +856,7 @@ app.delete('/api/bookings/:id', async (req, res) => {
   res.json({
     success: true,
     message: 'ยกเลิกการจองเรียบร้อยแล้ว',
-    booking: bookings[bookingIndex],
+    booking: updated,
   });
 });
 
@@ -757,20 +976,30 @@ app.get('/api/gas/config', (req, res) => {
     success: true,
     config: {
       ...gasConfig,
-      adminPin: '****', // hide pin in public payload
+      adminPin: '****',
     },
   });
 });
 
 // POST /api/gas/config - บันทึกการตั้งค่า Google Apps Script
-app.post('/api/gas/config', (req, res) => {
-  const { webAppUrl, ownerEmail, promptpayPhone, promptpayName, adminPin } = req.body;
+app.post('/api/gas/config', async (req, res) => {
+  const { webAppUrl, ownerEmail, promptpayPhone, promptpayName, adminPin, autoSync } = req.body;
 
   if (webAppUrl !== undefined) gasConfig.webAppUrl = String(webAppUrl).trim();
   if (ownerEmail !== undefined) gasConfig.ownerEmail = String(ownerEmail).trim();
   if (promptpayPhone !== undefined) gasConfig.promptpayPhone = String(promptpayPhone).trim();
   if (promptpayName !== undefined) gasConfig.promptpayName = String(promptpayName).trim();
+  if (autoSync !== undefined) gasConfig.autoSync = Boolean(autoSync);
   if (adminPin && String(adminPin).length >= 4) gasConfig.adminPin = String(adminPin).trim();
+
+  // If new webAppUrl set, trigger initial sync
+  if (webAppUrl) {
+    syncFromGas(true).catch(() => {});
+  }
+
+  broadcastEvent('CONFIG_UPDATED', {
+    gasConfig: { ...gasConfig, adminPin: '****' },
+  });
 
   res.json({
     success: true,
@@ -813,6 +1042,8 @@ app.post('/api/gas/init-sheet', async (req, res) => {
 
   try {
     const result = await callGas('initSheet', {}, 'POST');
+    // After init, pull fresh data
+    await syncFromGas(true);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -833,28 +1064,47 @@ app.get('/api/gas/code', (req, res) => {
   }
 });
 
-// POST /api/gas/sync - ดึงข้อมูลล่าสุดจาก Google Sheet มาอัปเดต In-Memory Database
+// POST /api/gas/sync - ดึงข้อมูลล่าสุดจาก Google Sheet มาอัปเดต In-Memory Database (1-Click Pull)
 app.post('/api/gas/sync', async (req, res) => {
   if (!gasConfig.webAppUrl) {
     return res.json({ success: true, message: 'ใช้ระบบ In-memory ปกติ (ยังไม่ได้ตั้งค่า Web App URL)', synced: false });
   }
 
+  const result = await syncFromGas(false);
+  if (result.success) {
+    return res.json({
+      success: true,
+      message: `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${result.count} รายการ)`,
+      total: bookings.length,
+      synced: true,
+      lastSyncAt: gasConfig.lastSyncAt,
+    });
+  }
+
+  res.status(500).json({ success: false, error: result.error || 'ไม่สามารถซิงค์ข้อมูลได้' });
+});
+
+// POST /api/gas/push-all - ส่งข้อมูลทั้งหมดในระบบขึ้น Google Sheet (1-Click Full Push)
+app.post('/api/gas/push-all', async (req, res) => {
+  if (!gasConfig.webAppUrl) {
+    return res.status(400).json({ success: false, error: 'ยังไม่ได้ตั้งค่า Web App URL' });
+  }
+
   try {
-    const result = await callGas('getBookings', {}, 'GET');
-    if (result && result.success && Array.isArray(result.data)) {
-      // Merge bookings from sheet with local
-      const existingIds = new Set(result.data.map((b) => b.id));
-      const localOnly = bookings.filter((b) => !existingIds.has(b.id));
-      bookings = [...result.data, ...localOnly];
-      gasConfig.lastSyncAt = new Date().toISOString();
-      return res.json({
-        success: true,
-        message: `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${result.data.length} รายการ)`,
-        total: bookings.length,
-        synced: true,
-      });
-    }
-    res.json({ success: false, error: 'ไม่สามารถอ่านข้อมูลจาก Google Sheet ได้', result });
+    const result = await callGas('syncAllData', {
+      services,
+      staff,
+      bookings,
+    }, 'POST');
+
+    gasConfig.lastSyncAt = new Date().toISOString();
+    broadcastEvent('SHEET_SYNCED', { lastSyncAt: gasConfig.lastSyncAt, source: 'push-all' });
+
+    res.json({
+      success: true,
+      message: 'ส่งข้อมูลทั้งหมด (Services, Staff, Bookings) ขึ้น Google Sheet สำเร็จสมบูรณ์',
+      result,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -914,6 +1164,8 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     brand: 'The Bloom Studio',
     gasConnected: Boolean(gasConfig.webAppUrl),
+    realtimeClients: sseClients.size,
+    lastSyncAt: gasConfig.lastSyncAt,
     timestamp: new Date(),
   });
 });
@@ -934,8 +1186,14 @@ async function startServer() {
     });
   }
 
+  // Initial sync on startup if gas URL is set
+  if (gasConfig.webAppUrl) {
+    syncFromGas(true).catch(() => {});
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`The Bloom Studio server running on http://0.0.0.0:${PORT}`);
+    console.log(`🌸 The Bloom Studio server running on http://0.0.0.0:${PORT}`);
+    console.log(`⚡ Real-Time SSE Stream active on http://0.0.0.0:${PORT}/api/realtime/stream`);
   });
 }
 

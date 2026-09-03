@@ -1,7 +1,7 @@
 /**
  * ==============================================================================
  * The Bloom Studio - Google Apps Script (Web App) Backend
- * Google Sheets Database + Google Drive Slip Upload + Google Calendar + Email Alerts
+ * Google Sheets Real-Time Database + Drive Slips + Calendar + Email + Webhook Triggers
  * ==============================================================================
  *
  * วิธี Deploy เป็น Web App:
@@ -11,7 +11,7 @@
  * 4. กดบันทึก (Ctrl+S หรือ Cmd+S)
  * 5. กดปุ่ม "ทำให้ใช้งานได้ (Deploy)" > "การทำให้ใช้งานได้ใหม่ (New deployment)"
  * 6. เลือกประเภท: "เว็บแอป (Web app)"
- *    - คำอธิบาย: The Bloom Studio API v1
+ *    - คำอธิบาย: The Bloom Studio Real-Time API v2
  *    - ดำเนินการในฐานะ (Execute as): "ฉัน (Me)"
  *    - ผู้ที่มีสิทธิ์เข้าถึง (Who has access): "ทุกคน (Anyone)" ***สำคัญมาก เพื่อให้ส่งข้อมูลได้โดยไม่ต้องล็อกอิน Google***
  * 7. กด "ทำให้ใช้งานได้ (Deploy)" แล้วให้สิทธิ์การเข้าถึง (Authorize Access)
@@ -63,7 +63,7 @@ function doGet(e) {
     if (action === 'ping') {
       return createJsonResponse({
         success: true,
-        message: 'The Bloom Studio Apps Script Web App is online!',
+        message: 'The Bloom Studio Apps Script Web App is online & real-time ready!',
         timestamp: new Date().toISOString(),
       });
     }
@@ -86,6 +86,16 @@ function doGet(e) {
     if (action === 'getStaff') {
       var staff = getStaffFromSheet();
       return createJsonResponse({ success: true, data: staff });
+    }
+
+    if (action === 'getSettings') {
+      var settings = getSettingsFromSheet();
+      return createJsonResponse({ success: true, data: settings });
+    }
+
+    if (action === 'getAllData') {
+      var allData = getAllDataFromSheet();
+      return createJsonResponse({ success: true, data: allData });
     }
 
     return createJsonResponse({ success: false, error: 'Unknown action: ' + action });
@@ -131,6 +141,14 @@ function doPost(e) {
       return createJsonResponse(handleManageStaff(body));
     }
 
+    if (action === 'manageSettings') {
+      return createJsonResponse(handleManageSettings(body));
+    }
+
+    if (action === 'syncAllData' || action === 'pushAllData') {
+      return createJsonResponse(handleSyncAllData(body));
+    }
+
     return createJsonResponse({ success: false, error: 'Unknown POST action: ' + action });
   } catch (error) {
     return createJsonResponse({ success: false, error: error.toString() });
@@ -138,7 +156,7 @@ function doPost(e) {
 }
 
 /**
- * ฟังก์ชันสร้าง/ตรวจสอบชีตและใส่หัวคอลัมน์อัตโนมัติ (One-Click Auto Init)
+ * ฟังก์ชันสร้าง/ตรวจสอบชีตและใส่หัวคอลัมน์อัตโนมัติ พร้อมข้อมูลเริ่มต้น (One-Click Auto Init)
  */
 function setupSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -162,36 +180,68 @@ function setupSheets() {
   var serviceSheet = ss.getSheetByName(SHEET_SERVICES);
   if (!serviceSheet) {
     serviceSheet = ss.insertSheet(SHEET_SERVICES);
-    var serviceCols = ['ID', 'Name', 'Category', 'Price', 'DurationMinutes', 'Description'];
+  }
+  if (serviceSheet.getLastRow() === 0) {
+    var serviceCols = ['ID', 'Name', 'Category', 'Price', 'DurationMinutes', 'Description', 'Icon'];
     serviceSheet.appendRow(serviceCols);
     serviceSheet.getRange(1, 1, 1, serviceCols.length).setBackground('#EBF5FB').setFontWeight('bold');
     serviceSheet.setFrozenRows(1);
+
+    // Initial Seed Services
+    var defaultServices = [
+      ['s1', 'ทำเล็บเจลพรีเมียม (Gel Manicure Art)', 'Nails', 690, 60, 'ตัดแต่งทรงหนัง ทาสีเจลเกรดพรีเมียมนำเข้าจากเกาหลี พร้อมเคลือบเงา 3 ชั้น ปกป้องหน้าเล็บยาวนาน', 'Sparkles'],
+      ['s2', 'สปาเท้า & เพดิคิวร์ดีท็อกซ์ (Aroma Foot Spa)', 'Spa & Nails', 990, 75, 'แช่น้ำแร่เกลือหิมาลายัน สครับผลัดเซลล์ผิว ตัดแต่งเล็บ ขูดส้นเท้า และมาสก์บำรุงเข้มข้น', 'Footprints'],
+      ['s3', 'เฟเชียลทรีตเมนต์บำรุงล้ำลึก (Deep Glow Facial)', 'Facial', 1290, 60, 'ทำความสะอาดล้ำลึก นวดกระตุ้นคอลลาเจน ผลักวิตามินเข้มข้นด้วยไอออนโต และมาสก์ไฮยาลูรอนสดชื่น', 'Smile'],
+      ['s4', 'นวดอโรมาเธอราปีผ่อนคลาย (Aroma Oil Massage)', 'Massage', 1590, 90, 'นวดปรับสมดุลด้วยน้ำมันหอมระเหยออร์แกนิกเกรดบริสุทธิ์ ช่วยคลายความตึงเครียดและฟื้นฟูกายใจ', 'Flower2'],
+      ['s5', 'สปายกกระชับผิวหน้ากัวซา (Gua Sha Facial Lift)', 'Facial', 890, 45, 'ศาสตร์การนวดกระชับกรอบหน้าด้วยหินหยกธรรมชาติแท้ รีดน้ำเหลือง ลดบวม ผิวตึงกระชับมีเลือดฝาด', 'Gem'],
+      ['s6', 'ต่อขนตาธรรมชาติเส้นต่อเส้น (Natural Lash)', 'Lash', 1390, 90, 'เทคนิคญี่ปุ่นเส้นต่อเส้น น้ำหนักเบาสบาย ไม่เคืองตา ออกแบบรูปตาเฉพาะบุคคลให้หวานละมุนเป็นธรรมชาติ', 'Eye']
+    ];
+    defaultServices.forEach(function(row) {
+      serviceSheet.appendRow(row);
+    });
   }
 
   // 3. Sheet: Staff
   var staffSheet = ss.getSheetByName(SHEET_STAFF);
   if (!staffSheet) {
     staffSheet = ss.insertSheet(SHEET_STAFF);
-    var staffCols = ['ID', 'Name', 'Nickname', 'Role', 'Experience', 'Rating', 'Avatar', 'Services'];
+  }
+  if (staffSheet.getLastRow() === 0) {
+    var staffCols = ['ID', 'Name', 'Nickname', 'Role', 'Experience', 'Rating', 'Avatar', 'Services', 'Bio'];
     staffSheet.appendRow(staffCols);
     staffSheet.getRange(1, 1, 1, staffCols.length).setBackground('#EAF2F8').setFontWeight('bold');
     staffSheet.setFrozenRows(1);
+
+    // Initial Seed Staff
+    var defaultStaff = [
+      ['st1', 'ช่างพลอย (Ploy)', 'พลอย', 'Senior Nail & Lash Artist', '5 ปี', 4.95, 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80', 's1,s2,s6', 'เชี่ยวชาญการเพ้นท์เล็บสไตล์มินิมอลเกาหลีและต่อขนตาเส้นต่อเส้นเนียนเป็นธรรมชาติ'],
+      ['st2', 'ช่างเมย์ (May)', 'เมย์', 'Master Aesthetician & Facialist', '7 ปี', 4.98, 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=300&q=80', 's3,s5', 'ผู้เชี่ยวชาญด้านการดูแลฟื้นฟูผิวหน้า การกดจุดรีดน้ำเหลือง และศาสตร์กัวซาหยกแท้'],
+      ['st3', 'ช่างแนน (Nan)', 'แนน', 'Certified Spa & Body Therapist', '6 ปี', 4.93, 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=300&q=80', 's2,s4', 'ใบรับรองสปานานาชาติ เชี่ยวชาญการนวดอโรมาผ่อนคลายกล้ามเนื้อและสปาเท้าบำบัด'],
+      ['st4', 'ช่างกิ๊ฟ (Gift)', 'กิ๊ฟ', 'All-Rounder Beauty Specialist', '4 ปี', 4.91, 'https://images.unsplash.com/photo-1567532939604-b6b5b0db2604?auto=format&fit=crop&w=300&q=80', 's1,s2,s3,s5', 'มีความประณีต อ่อนโยน ให้บริการทั้งเล็บ สปา และดูแลผิวหน้าอย่างครบวงจร']
+    ];
+    defaultStaff.forEach(function(row) {
+      staffSheet.appendRow(row);
+    });
   }
 
   // 4. Sheet: Settings
   var settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
   if (!settingsSheet) {
     settingsSheet = ss.insertSheet(SHEET_SETTINGS);
+  }
+  if (settingsSheet.getLastRow() === 0) {
     settingsSheet.appendRow(['Key', 'Value', 'Description']);
     settingsSheet.getRange(1, 1, 1, 3).setBackground('#E8F8F5').setFontWeight('bold');
-    settingsSheet.appendRow(['OwnerEmail', Session.getEffectiveUser().getEmail(), 'อีเมลร้านสำหรับรับแจ้งเตือน']);
+    settingsSheet.setFrozenRows(1);
+    settingsSheet.appendRow(['OwnerEmail', Session.getEffectiveUser().getEmail() || 'NatapongMumklang@gmail.com', 'อีเมลร้านสำหรับรับแจ้งเตือน']);
     settingsSheet.appendRow(['PromptPayNumber', '0812345678', 'เบอร์พร้อมเพย์รับชำระเงิน']);
     settingsSheet.appendRow(['ShopName', 'The Bloom Studio', 'ชื่อร้าน']);
+    settingsSheet.appendRow(['ServerWebhookUrl', '', 'URL เซิร์ฟเวอร์สำหรับรับการแจ้งเตือน Real-Time เมื่อแก้ชีต']);
   }
 
   return {
     success: true,
-    message: 'เริ่มต้นตาราง Google Sheet เรียบร้อยแล้ว (สร้างคอลัมน์ครบ 4 แท็บ)',
+    message: 'เริ่มต้นตาราง Google Sheet เรียบร้อยแล้ว (สร้าง 4 แท็บ พร้อมข้อมูลเริ่มต้น)',
     sheetsCreated: [SHEET_BOOKINGS, SHEET_SERVICES, SHEET_STAFF, SHEET_SETTINGS],
     columns: BOOKING_COLUMNS,
   };
@@ -206,7 +256,7 @@ function handleCreateBooking(data) {
   var sheet = ss.getSheetByName(SHEET_BOOKINGS);
 
   var bookingId = data.id || ('BLM-' + new Date().getTime().toString(36).toUpperCase());
-  var createdAt = new Date().toISOString();
+  var createdAt = data.createdAt || new Date().toISOString();
   var status = data.status || 'pending';
   var date = data.date;
   var time = data.time;
@@ -223,7 +273,7 @@ function handleCreateBooking(data) {
 
   // 1. จัดการสลิปการโอนเงิน (ถ้ามี base64 ส่งมา) -> บันทึกลง Google Drive
   var slipUrl = data.slipUrl || '';
-  var paymentStatus = 'unpaid';
+  var paymentStatus = data.paymentStatus || 'unpaid';
 
   if (data.slipBase64) {
     try {
@@ -354,7 +404,6 @@ function uploadSlipToGoogleDrive(base64Data, bookingId, customerName) {
   var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
 
   var file = folder.createFile(blob);
-  // ตั้งค่าให้อ่านไฟล์ได้ผ่านลิงก์
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
   return file.getUrl();
@@ -416,7 +465,7 @@ function sendBookingEmails(info) {
     '<p style="margin: 0 0 8px; font-size: 14px;"><strong>บริการ:</strong> ' + info.serviceName + '</p>' +
     '<p style="margin: 0 0 8px; font-size: 14px;"><strong>ช่างผู้ดูแล:</strong> ' + info.staffName + '</p>' +
     '<p style="margin: 0 0 8px; font-size: 14px;"><strong>วันและเวลานัด:</strong> ' + info.date + ' เวลา ' + info.time + ' น. (' + info.duration + ' นาที)</p>' +
-    '<p style="margin: 0 0 8px; font-size: 14px;"><strong>ยอดชำระ:</strong> ' + info.servicePrice.toLocaleString() + ' บาท</p>' +
+    '<p style="margin: 0 0 8px; font-size: 14px;"><strong>ยอดชำระ:</strong> ' + Number(info.servicePrice).toLocaleString() + ' บาท</p>' +
     '<p style="margin: 0 0 8px; font-size: 14px;"><strong>ลูกค้า:</strong> ' + info.customerName + ' (โทร: ' + info.customerPhone + ')</p>' +
     (info.specialRequest ? '<p style="margin: 0 0 8px; font-size: 14px;"><strong>ความต้องการพิเศษ:</strong> ' + info.specialRequest + '</p>' : '') +
     (info.slipUrl ? '<p style="margin: 0; font-size: 14px;"><strong>สลิปการโอนเงิน:</strong> <a href="' + info.slipUrl + '" target="_blank" style="color: #06C755;">ดูรูปสลิปบน Google Drive</a></p>' : '') +
@@ -424,7 +473,6 @@ function sendBookingEmails(info) {
     '<p style="font-size: 12px; color: #999; text-align: center; margin: 0;">หากต้องการสอบถามหรือแก้ไขข้อมูล กรุณาติดต่อทางร้านโดยตรง ขอบคุณที่ไว้วางใจ The Bloom Studio ค่ะ</p>' +
     '</div>';
 
-  // 1. ส่งอีเมลให้ร้านค้า
   if (ownerEmail) {
     MailApp.sendEmail({
       to: ownerEmail,
@@ -433,7 +481,6 @@ function sendBookingEmails(info) {
     });
   }
 
-  // 2. ส่งอีเมลให้ลูกค้า (ถ้าลูกค้ากรอกไว้)
   if (info.customerEmail && info.customerEmail.indexOf('@') > 0) {
     MailApp.sendEmail({
       to: info.customerEmail,
@@ -508,10 +555,8 @@ function handleUpdateBookingStatus(body) {
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === String(id)) {
-      sheet.getRange(i + 1, 3).setValue(newStatus); // Col 3 คือ Status
-      if (body.paymentStatus) {
-        sheet.getRange(i + 1, 14).setValue(body.paymentStatus); // Col 14 คือ Payment Status
-      }
+      if (newStatus) sheet.getRange(i + 1, 3).setValue(newStatus); // Col 3: Status
+      if (body.paymentStatus) sheet.getRange(i + 1, 14).setValue(body.paymentStatus); // Col 14: Payment Status
       return { success: true, message: 'อัปเดตสถานะเป็น ' + newStatus + ' เรียบร้อย' };
     }
   }
@@ -524,6 +569,376 @@ function handleUpdateBookingStatus(body) {
  */
 function handleCancelBooking(id) {
   return handleUpdateBookingStatus({ id: id, status: 'cancelled' });
+}
+
+/**
+ * ดึงรายการบริการ (Services) จาก Google Sheet
+ */
+function getServicesFromSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_SERVICES);
+  if (!sheet) return [];
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+
+  var services = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0]) continue;
+    services.push({
+      id: String(row[0]),
+      name: String(row[1] || ''),
+      category: String(row[2] || 'General'),
+      price: Number(row[3] || 0),
+      durationMinutes: Number(row[4] || 60),
+      description: String(row[5] || ''),
+      icon: String(row[6] || 'Sparkles'),
+    });
+  }
+  return services;
+}
+
+/**
+ * จัดการบริการ (Services) ใน Google Sheet: Add, Update, Delete
+ */
+function handleManageService(body) {
+  setupSheets();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_SERVICES);
+  if (!sheet) return { success: false, error: 'Services sheet not found' };
+
+  var subAction = body.subAction || 'add';
+  var data = sheet.getDataRange().getValues();
+
+  if (subAction === 'add') {
+    var s = body.service || {};
+    var id = s.id || ('s' + Date.now().toString(36));
+    var newRow = [
+      id,
+      s.name || '',
+      s.category || 'General',
+      Number(s.price || 0),
+      Number(s.durationMinutes || 60),
+      s.description || '',
+      s.icon || 'Sparkles'
+    ];
+    sheet.appendRow(newRow);
+    return { success: true, message: 'เพิ่มบริการสำเร็จ', data: s };
+  }
+
+  if (subAction === 'update') {
+    var s = body.service || {};
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(s.id)) {
+        var rowNum = i + 1;
+        if (s.name !== undefined) sheet.getRange(rowNum, 2).setValue(s.name);
+        if (s.category !== undefined) sheet.getRange(rowNum, 3).setValue(s.category);
+        if (s.price !== undefined) sheet.getRange(rowNum, 4).setValue(Number(s.price));
+        if (s.durationMinutes !== undefined) sheet.getRange(rowNum, 5).setValue(Number(s.durationMinutes));
+        if (s.description !== undefined) sheet.getRange(rowNum, 6).setValue(s.description);
+        if (s.icon !== undefined) sheet.getRange(rowNum, 7).setValue(s.icon);
+        return { success: true, message: 'แก้ไขบริการสำเร็จ', data: s };
+      }
+    }
+    return { success: false, error: 'ไม่พบบริการ ' + s.id };
+  }
+
+  if (subAction === 'delete') {
+    var id = body.id;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'ลบบริการสำเร็จ' };
+      }
+    }
+    return { success: false, error: 'ไม่พบบริการ ' + id };
+  }
+
+  return { success: false, error: 'Unknown service action' };
+}
+
+/**
+ * ดึงรายชื่อช่าง (Staff) จาก Google Sheet
+ */
+function getStaffFromSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_STAFF);
+  if (!sheet) return [];
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+
+  var staffList = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0]) continue;
+    var servicesStr = String(row[7] || '');
+    var servicesArr = servicesStr ? servicesStr.split(',').map(function(item) { return item.trim(); }) : [];
+    staffList.push({
+      id: String(row[0]),
+      name: String(row[1] || ''),
+      nickname: String(row[2] || ''),
+      role: String(row[3] || 'Therapist'),
+      experience: String(row[4] || '1 ปี'),
+      rating: Number(row[5] || 5.0),
+      avatar: String(row[6] || ''),
+      services: servicesArr,
+      bio: String(row[8] || ''),
+    });
+  }
+  return staffList;
+}
+
+/**
+ * จัดการช่าง (Staff) ใน Google Sheet: Add, Update, Delete
+ */
+function handleManageStaff(body) {
+  setupSheets();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_STAFF);
+  if (!sheet) return { success: false, error: 'Staff sheet not found' };
+
+  var subAction = body.subAction || 'add';
+  var data = sheet.getDataRange().getValues();
+
+  if (subAction === 'add') {
+    var st = body.staff || {};
+    var id = st.id || ('st' + Date.now().toString(36));
+    var servicesStr = Array.isArray(st.services) ? st.services.join(',') : String(st.services || '');
+    var newRow = [
+      id,
+      st.name || '',
+      st.nickname || '',
+      st.role || 'Therapist',
+      st.experience || '3 ปี',
+      Number(st.rating || 5.0),
+      st.avatar || '',
+      servicesStr,
+      st.bio || ''
+    ];
+    sheet.appendRow(newRow);
+    return { success: true, message: 'เพิ่มข้อมูลช่างสำเร็จ', data: st };
+  }
+
+  if (subAction === 'update') {
+    var st = body.staff || {};
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(st.id)) {
+        var rowNum = i + 1;
+        if (st.name !== undefined) sheet.getRange(rowNum, 2).setValue(st.name);
+        if (st.nickname !== undefined) sheet.getRange(rowNum, 3).setValue(st.nickname);
+        if (st.role !== undefined) sheet.getRange(rowNum, 4).setValue(st.role);
+        if (st.experience !== undefined) sheet.getRange(rowNum, 5).setValue(st.experience);
+        if (st.rating !== undefined) sheet.getRange(rowNum, 6).setValue(Number(st.rating));
+        if (st.avatar !== undefined) sheet.getRange(rowNum, 7).setValue(st.avatar);
+        if (st.services !== undefined) {
+          var sStr = Array.isArray(st.services) ? st.services.join(',') : String(st.services);
+          sheet.getRange(rowNum, 8).setValue(sStr);
+        }
+        if (st.bio !== undefined) sheet.getRange(rowNum, 9).setValue(st.bio);
+        return { success: true, message: 'แก้ไขข้อมูลช่างสำเร็จ', data: st };
+      }
+    }
+    return { success: false, error: 'ไม่พบช่าง ' + st.id };
+  }
+
+  if (subAction === 'delete') {
+    var id = body.id;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'ลบข้อมูลช่างสำเร็จ' };
+      }
+    }
+    return { success: false, error: 'ไม่พบช่าง ' + id };
+  }
+
+  return { success: false, error: 'Unknown staff action' };
+}
+
+/**
+ * ดึงการตั้งค่าร้าน (Settings) จาก Google Sheet
+ */
+function getSettingsFromSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_SETTINGS);
+  if (!sheet) return {};
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return {};
+
+  var settings = {};
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (row[0]) {
+      settings[String(row[0])] = String(row[1] || '');
+    }
+  }
+  return settings;
+}
+
+/**
+ * บันทึกการตั้งค่าร้าน (Settings)
+ */
+function handleManageSettings(body) {
+  setupSheets();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_SETTINGS);
+  if (!sheet) return { success: false, error: 'Settings sheet not found' };
+
+  var settings = body.settings || {};
+  var data = sheet.getDataRange().getValues();
+  var existingKeys = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var k = String(data[i][0]);
+    if (k) existingKeys[k] = i + 1;
+  }
+
+  Object.keys(settings).forEach(function(key) {
+    var val = settings[key];
+    if (existingKeys[key]) {
+      sheet.getRange(existingKeys[key], 2).setValue(String(val));
+    } else {
+      sheet.appendRow([key, String(val), '']);
+    }
+  });
+
+  return { success: true, message: 'บันทึกการตั้งค่าลง Google Sheet สำเร็จ', settings: settings };
+}
+
+/**
+ * ดึงข้อมูลทั้งหมดในตาราง (All Data: Services, Staff, Bookings, Settings)
+ */
+function getAllDataFromSheet() {
+  return {
+    services: getServicesFromSheet(),
+    staff: getStaffFromSheet(),
+    bookings: getBookingsFromSheet(),
+    settings: getSettingsFromSheet(),
+  };
+}
+
+/**
+ * บันทึก/ซิงค์ข้อมูลชุดใหญ่ (Full Push/Sync) จากเซิร์ฟเวอร์ขึ้น Google Sheet
+ */
+function handleSyncAllData(body) {
+  setupSheets();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. Services
+  if (Array.isArray(body.services) && body.services.length > 0) {
+    var serviceSheet = ss.getSheetByName(SHEET_SERVICES);
+    if (serviceSheet) {
+      serviceSheet.clearContents();
+      serviceSheet.appendRow(['ID', 'Name', 'Category', 'Price', 'DurationMinutes', 'Description', 'Icon']);
+      body.services.forEach(function(s) {
+        serviceSheet.appendRow([
+          s.id,
+          s.name || '',
+          s.category || 'General',
+          Number(s.price || 0),
+          Number(s.durationMinutes || 60),
+          s.description || '',
+          s.icon || 'Sparkles'
+        ]);
+      });
+      serviceSheet.getRange(1, 1, 1, 7).setBackground('#EBF5FB').setFontWeight('bold');
+    }
+  }
+
+  // 2. Staff
+  if (Array.isArray(body.staff) && body.staff.length > 0) {
+    var staffSheet = ss.getSheetByName(SHEET_STAFF);
+    if (staffSheet) {
+      staffSheet.clearContents();
+      staffSheet.appendRow(['ID', 'Name', 'Nickname', 'Role', 'Experience', 'Rating', 'Avatar', 'Services', 'Bio']);
+      body.staff.forEach(function(st) {
+        var servicesStr = Array.isArray(st.services) ? st.services.join(',') : String(st.services || '');
+        staffSheet.appendRow([
+          st.id,
+          st.name || '',
+          st.nickname || '',
+          st.role || 'Therapist',
+          st.experience || '3 ปี',
+          Number(st.rating || 5.0),
+          st.avatar || '',
+          servicesStr,
+          st.bio || ''
+        ]);
+      });
+      staffSheet.getRange(1, 1, 1, 9).setBackground('#EAF2F8').setFontWeight('bold');
+    }
+  }
+
+  // 3. Bookings (if provided)
+  if (Array.isArray(body.bookings) && body.bookings.length > 0) {
+    var bookingSheet = ss.getSheetByName(SHEET_BOOKINGS);
+    if (bookingSheet && bookingSheet.getLastRow() <= 1) {
+      body.bookings.forEach(function(b) {
+        bookingSheet.appendRow([
+          b.id,
+          b.createdAt || new Date().toISOString(),
+          b.status || 'pending',
+          b.date,
+          b.time,
+          b.serviceName || '',
+          Number(b.servicePrice || 0),
+          Number(b.serviceDuration || 60),
+          b.staffName || '',
+          b.customerName || '',
+          b.customerPhone || '',
+          b.customerEmail || '',
+          b.specialRequest || '',
+          b.paymentStatus || 'unpaid',
+          b.slipUrl || '',
+          b.calendarEventId || '',
+          b.lineUserId || '',
+          b.lineDisplayName || '',
+        ]);
+      });
+    }
+  }
+
+  return {
+    success: true,
+    message: 'ซิงค์ข้อมูลทั้งหมดขึ้น Google Sheet สำเร็จสมบูรณ์',
+  };
+}
+
+/**
+ * ฟังก์ชัน Webhook Trigger เมื่อมีการแก้ไขข้อมูลใน Google Sheet โดยตรง (onEdit Trigger)
+ * ส่งแจ้งเตือน Real-Time ไปยัง Backend Server ทันที
+ */
+function onEdit(e) {
+  try {
+    var settings = getSettingsFromSheet();
+    var webhookUrl = settings.ServerWebhookUrl;
+    if (!webhookUrl) return;
+
+    var range = e ? e.range : null;
+    var sheetName = range ? range.getSheet().getName() : 'Unknown';
+
+    var payload = {
+      event: 'SHEET_EDITED',
+      sheetName: sheetName,
+      row: range ? range.getRow() : null,
+      column: range ? range.getColumn() : null,
+      timestamp: new Date().toISOString(),
+    };
+
+    var options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+    };
+
+    UrlFetchApp.fetch(webhookUrl, options);
+  } catch (err) {
+    Logger.log('onEdit Webhook Error: ' + err.toString());
+  }
 }
 
 function formatSheetDate(val) {

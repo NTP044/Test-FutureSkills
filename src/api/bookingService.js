@@ -1,6 +1,6 @@
 /**
  * API Service Layer for The Bloom Studio
- * Handles communication with Express backend endpoints and Google Apps Script
+ * Handles communication with Express backend endpoints, Google Apps Script, and Real-Time SSE Streams
  */
 
 const API_BASE = '/api';
@@ -311,12 +311,30 @@ export async function getGasCode() {
   return data.code;
 }
 
+/**
+ * ดึงข้อมูลล่าสุดจาก Google Sheet มาอัปเดตระบบ (1-Click Pull)
+ */
 export async function syncGoogleSheet() {
   const response = await fetch(`${API_BASE}/gas/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
   const data = await response.json();
+  return data;
+}
+
+/**
+ * ส่งข้อมูลทั้งหมดขึ้น Google Sheet (1-Click Push All)
+ */
+export async function pushAllToGoogleSheet() {
+  const response = await fetch(`${API_BASE}/gas/push-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'ไม่สามารถส่งข้อมูลขึ้น Google Sheet ได้');
+  }
   return data;
 }
 
@@ -340,4 +358,71 @@ export async function getWorkspaceExportData() {
   const response = await fetch(`${API_BASE}/workspace/export-data`);
   const data = await response.json();
   return data.data || {};
+}
+
+/**
+ * ตรวจสอบสถานะ Real-Time Engine
+ */
+export async function getRealtimeStatus() {
+  const response = await fetch(`${API_BASE}/realtime/status`);
+  const data = await response.json();
+  return data;
+}
+
+/**
+ * Real-Time Event Subscription using Server-Sent Events (SSE)
+ * @param {Function} onEvent Callback for real-time messages ({ type, data, timestamp })
+ * @param {Function} onStatusChange Callback for connection status ('connecting' | 'connected' | 'error' | 'closed')
+ * @returns {Function} Unsubscribe cleanup function
+ */
+export function subscribeToRealtimeEvents(onEvent, onStatusChange) {
+  let eventSource = null;
+  let reconnectTimer = null;
+  let isClosed = false;
+
+  function connect() {
+    if (isClosed) return;
+    onStatusChange?.('connecting');
+
+    try {
+      eventSource = new EventSource(`${API_BASE}/realtime/stream`);
+
+      eventSource.onopen = () => {
+        onStatusChange?.('connected');
+      };
+
+      eventSource.onmessage = (e) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          onEvent?.(parsed);
+        } catch (err) {
+          console.warn('[SSE Parse Warning]', err);
+        }
+      };
+
+      eventSource.onerror = () => {
+        onStatusChange?.('error');
+        eventSource?.close();
+        if (!isClosed) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+    } catch (err) {
+      onStatusChange?.('error');
+      if (!isClosed) {
+        reconnectTimer = setTimeout(connect, 3000);
+      }
+    }
+  }
+
+  connect();
+
+  return () => {
+    isClosed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (eventSource) {
+      eventSource.close();
+      onStatusChange?.('closed');
+    }
+  };
 }

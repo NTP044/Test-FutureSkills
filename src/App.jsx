@@ -38,6 +38,7 @@ import {
   getBookings,
   cancelBooking,
   getWorkspaceConfig,
+  subscribeToRealtimeEvents,
 } from './api/bookingService.js';
 import {
   getCachedToken,
@@ -185,6 +186,10 @@ export default function App() {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [searchPhone, setSearchPhone] = useState('');
 
+  // Real-Time SSE Connection Status
+  const [realtimeState, setRealtimeState] = useState('connecting'); // 'connecting' | 'connected' | 'error'
+
+
   // LINE MINI App & LIFF State
   const [liffReady, setLiffReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -265,6 +270,81 @@ export default function App() {
 
   // Generated calendar dates
   const calendarDates = useMemo(() => generateDateOptions(), []);
+
+  // Real-Time SSE Subscription for Instant Two-Way Updates
+  useEffect(() => {
+    const unsubscribe = subscribeToRealtimeEvents(
+      (event) => {
+        const { type, data } = event;
+
+        // When availability or bookings change
+        if (
+          type === 'BOOKING_CREATED' ||
+          type === 'BOOKING_UPDATED' ||
+          type === 'BOOKING_CANCELLED' ||
+          type === 'AVAILABILITY_CHANGED'
+        ) {
+          // 1. Refresh availability for currently selected staff & date
+          if (selectedStaffId && selectedDate) {
+            getAvailability(selectedStaffId, selectedDate)
+              .then((res) => {
+                setAvailableSlots(res.availableSlots || []);
+                setBookedSlots(res.bookedSlots || []);
+                // If user selected slot was booked by someone else, deselect it
+                setSelectedTime((prev) => (res.availableSlots.includes(prev) ? prev : ''));
+              })
+              .catch(() => {});
+          }
+
+          // 2. If My Bookings drawer is open, auto-refresh
+          if (showMyBookings) {
+            fetchMyBookings(searchPhone || (lineProfile?.userId ? '' : customerPhone));
+          }
+
+          // 3. If currently showing a confirmed booking modal and it was updated
+          if (confirmedBooking && data?.booking && data.booking.id === confirmedBooking.id) {
+            setConfirmedBooking(data.booking);
+          }
+        }
+
+        // When services master list updated
+        if (type === 'SERVICES_UPDATED' && Array.isArray(data?.services)) {
+          setServices(data.services);
+        }
+
+        // When staff master list updated
+        if (type === 'STAFF_UPDATED' && selectedServiceId) {
+          getStaff(selectedServiceId)
+            .then((stList) => setStaffList(stList))
+            .catch(() => {});
+        }
+
+        // When Google Sheet full sync completes
+        if (type === 'SHEET_SYNCED') {
+          getServices().then((sv) => setServices(sv)).catch(() => {});
+          if (selectedServiceId) {
+            getStaff(selectedServiceId).then((st) => setStaffList(st)).catch(() => {});
+          }
+          if (selectedStaffId && selectedDate) {
+            getAvailability(selectedStaffId, selectedDate).then((res) => {
+              setAvailableSlots(res.availableSlots || []);
+              setBookedSlots(res.bookedSlots || []);
+            }).catch(() => {});
+          }
+          if (showMyBookings) {
+            fetchMyBookings(searchPhone || (lineProfile?.userId ? '' : customerPhone));
+          }
+        }
+      },
+      (status) => {
+        setRealtimeState(status);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [selectedStaffId, selectedDate, selectedServiceId, showMyBookings, searchPhone, lineProfile, customerPhone, confirmedBooking]);
 
   // Set default date to today on mount
   useEffect(() => {
@@ -573,6 +653,33 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Live Real-Time Badge */}
+            <div
+              className={`hidden sm:flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                realtimeState === 'connected'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : realtimeState === 'connecting'
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse'
+                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}
+              title={
+                realtimeState === 'connected'
+                  ? 'เชื่อมต่อข้อมูลกับ Google Sheet & Server แบบ Real-Time'
+                  : 'กำลังเชื่อมต่อ Real-Time...'
+              }
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  realtimeState === 'connected'
+                    ? 'bg-emerald-500 animate-pulse'
+                    : realtimeState === 'connecting'
+                    ? 'bg-amber-500'
+                    : 'bg-rose-500'
+                }`}
+              />
+              <span>{realtimeState === 'connected' ? 'Real-Time' : 'Connecting'}</span>
+            </div>
+
             <button
               id="btn-admin-panel"
               onClick={() => {
