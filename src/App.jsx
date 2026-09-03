@@ -484,14 +484,15 @@ export default function App() {
 
   // Form validity check (requires user to be logged in)
   const isFormValid = useMemo(() => {
-    const cleanPhone = customerPhone.replace(/[\s-]/g, '');
+    const cleanPhone = String(customerPhone || '').replace(/[\s-]/g, '');
+    const cleanName = String(customerName || '').trim();
     return (
       isLoggedIn &&
       selectedServiceId &&
       selectedStaffId &&
       selectedDate &&
       selectedTime &&
-      customerName.trim().length >= 2 &&
+      cleanName.length >= 2 &&
       cleanPhone.length >= 9 &&
       cleanPhone.length <= 12 &&
       /^\d+$/.test(cleanPhone)
@@ -639,28 +640,31 @@ export default function App() {
     try {
       setLoadingBookings(true);
       let filter = '';
-      if (phoneFilter) {
-        filter = phoneFilter;
+      if (typeof phoneFilter === 'string' && phoneFilter.trim()) {
+        filter = phoneFilter.trim();
       } else if (lineProfile?.userId) {
         filter = { lineUserId: lineProfile.userId };
-      } else if (customerPhone) {
-        filter = customerPhone;
+      } else if (typeof customerPhone === 'string' && customerPhone.trim()) {
+        filter = customerPhone.trim();
       } else {
         setAllBookings([]);
         return;
       }
 
       const data = await getBookings(filter);
+      const cleanPhoneFilter = typeof phoneFilter === 'string' ? phoneFilter.replace(/[\s-]/g, '') : '';
+      const cleanCustPhone = typeof customerPhone === 'string' ? customerPhone.replace(/[\s-]/g, '') : '';
+
       // Extra strict client-side filter to ensure privacy: only matching user's lineUserId or phone
       const strictlyMyBookings = (data || []).filter((b) => {
         if (lineProfile?.userId && b.lineUserId === lineProfile.userId) return true;
-        if (phoneFilter && b.customerPhone === phoneFilter.replace(/[\s-]/g, '')) return true;
-        if (customerPhone && b.customerPhone === customerPhone.replace(/[\s-]/g, '')) return true;
+        if (cleanPhoneFilter && b.customerPhone === cleanPhoneFilter) return true;
+        if (cleanCustPhone && b.customerPhone === cleanCustPhone) return true;
         return false;
       });
       setAllBookings(strictlyMyBookings);
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching my bookings:', err);
       setAllBookings([]);
     } finally {
       setLoadingBookings(false);
