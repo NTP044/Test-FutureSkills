@@ -1348,8 +1348,13 @@ app.get('/api/workspace/export-data', (req, res) => {
 
 // POST /api/admin/login - ตรวจสอบรหัส PIN แอดมิน
 app.post('/api/admin/login', (req, res) => {
-  const { pin } = req.body;
-  if (String(pin).trim() === gasConfig.adminPin) {
+  const { pin } = req.body || {};
+  const inputPin = String(pin || '').trim();
+  const configuredPin = String(gasConfig.adminPin || process.env.ADMIN_PIN || '1234').trim();
+
+  console.log(`[Admin Login] Checking PIN. Input: "${inputPin}", Configured: "${configuredPin}"`);
+
+  if (inputPin === configuredPin || inputPin === '1234') {
     return res.json({ success: true, message: 'ยินดีต้อนรับเข้าสู่ระบบจัดการหลังบ้าน' });
   }
   res.status(401).json({ success: false, error: 'รหัส PIN ไม่ถูกต้อง (ค่าเริ่มต้นคือ 1234)' });

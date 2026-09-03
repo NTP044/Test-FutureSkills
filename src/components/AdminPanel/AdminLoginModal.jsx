@@ -7,6 +7,32 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Support direct keyboard input (0-9, Enter, Backspace, Escape)
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key >= '0' && e.key <= '9') {
+        if (pin.length < 6) {
+          setPin((prev) => prev + e.key);
+          setError('');
+        }
+      } else if (e.key === 'Backspace') {
+        setPin((prev) => prev.slice(0, -1));
+        setError('');
+      } else if (e.key === 'Escape') {
+        onClose();
+      } else if (e.key === 'Enter') {
+        if (pin.length >= 4) {
+          handleSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, pin]);
+
   if (!isOpen) return null;
 
   const handleNumClick = (num) => {
