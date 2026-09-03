@@ -263,6 +263,10 @@ export default function App() {
       logoutFromLine();
       setIsLoggedIn(false);
       setLineProfile(null);
+      setCustomerName('');
+      setCustomerPhone('');
+      setAllBookings([]);
+      setShowMyBookings(false);
     } catch (err) {
       console.error('Error during LINE logout:', err);
     }
@@ -444,10 +448,11 @@ export default function App() {
     [staffList, selectedStaffId]
   );
 
-  // Form validity check
+  // Form validity check (requires user to be logged in)
   const isFormValid = useMemo(() => {
     const cleanPhone = customerPhone.replace(/[\s-]/g, '');
     return (
+      isLoggedIn &&
       selectedServiceId &&
       selectedStaffId &&
       selectedDate &&
@@ -458,6 +463,7 @@ export default function App() {
       /^\d+$/.test(cleanPhone)
     );
   }, [
+    isLoggedIn,
     selectedServiceId,
     selectedStaffId,
     selectedDate,
@@ -482,6 +488,11 @@ export default function App() {
   // Step 1: When user clicks "จองเลย", open PromptPay Modal
   const handleBookingSubmit = (e) => {
     if (e) e.preventDefault();
+    if (!isLoggedIn) {
+      setErrorMessage('กรุณาเข้าสู่ระบบด้วย LINE ก่อนทำการจองคิว เพื่อบันทึกประวัติและยืนยันคิวของคุณ');
+      handleLineLogin();
+      return;
+    }
     if (!isFormValid || isSubmitting) return;
     setErrorMessage('');
     setShowPromptPayModal(true);
@@ -568,19 +579,40 @@ export default function App() {
     setErrorMessage('');
   };
 
-  // Fetch bookings list for the drawer
+  // Fetch bookings list for the drawer (strictly for logged-in user only)
   const fetchMyBookings = async (phoneFilter = '') => {
+    // If not logged in and no phone filter entered, NEVER fetch all bookings!
+    if (!isLoggedIn && !phoneFilter && !lineProfile?.userId) {
+      setAllBookings([]);
+      return;
+    }
+
     try {
       setLoadingBookings(true);
-      const filter = phoneFilter
-        ? phoneFilter
-        : lineProfile?.userId
-        ? { lineUserId: lineProfile.userId }
-        : '';
+      let filter = '';
+      if (phoneFilter) {
+        filter = phoneFilter;
+      } else if (lineProfile?.userId) {
+        filter = { lineUserId: lineProfile.userId };
+      } else if (customerPhone) {
+        filter = customerPhone;
+      } else {
+        setAllBookings([]);
+        return;
+      }
+
       const data = await getBookings(filter);
-      setAllBookings(data);
+      // Extra strict client-side filter to ensure privacy: only matching user's lineUserId or phone
+      const strictlyMyBookings = (data || []).filter((b) => {
+        if (lineProfile?.userId && b.lineUserId === lineProfile.userId) return true;
+        if (phoneFilter && b.customerPhone === phoneFilter.replace(/[\s-]/g, '')) return true;
+        if (customerPhone && b.customerPhone === customerPhone.replace(/[\s-]/g, '')) return true;
+        return false;
+      });
+      setAllBookings(strictlyMyBookings);
     } catch (err) {
       console.error(err);
+      setAllBookings([]);
     } finally {
       setLoadingBookings(false);
     }
@@ -588,7 +620,11 @@ export default function App() {
 
   const openBookingsDrawer = () => {
     setShowMyBookings(true);
-    fetchMyBookings(searchPhone || (lineProfile?.userId ? '' : customerPhone));
+    if (isLoggedIn) {
+      fetchMyBookings(searchPhone || (lineProfile?.userId ? '' : customerPhone));
+    } else {
+      setAllBookings([]);
+    }
   };
 
   const handleCancelBooking = async (id) => {
@@ -1211,36 +1247,56 @@ export default function App() {
             </div>
           </div>
 
-          {/* Confirm Button - Height min 48px */}
-          <button
-            id="btn-confirm-booking"
-            type="button"
-            disabled={!isFormValid || isSubmitting}
-            onClick={handleBookingSubmit}
-            className={`w-full h-14 min-h-[48px] rounded-2xl font-semibold text-base flex items-center justify-center space-x-2 transition-all duration-200 shadow-md ${
-              isFormValid && !isSubmitting
-                ? 'bg-[#D4A373] hover:bg-[#c49261] text-white active:scale-[0.99] cursor-pointer'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
-            }`}
-          >
-            {isSubmitting ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-                <span>กำลังบันทึกคิวของคุณ...</span>
-              </>
-            ) : (
-              <>
-                <span>จองเลย</span>
-                <ArrowRight className="w-5 h-5 ml-1" />
-              </>
-            )}
-          </button>
-
-          {!isFormValid && (
-            <p className="text-[11px] text-gray-400 text-center mt-2">
-              * กรุณาเลือกบริการ ช่าง วันนัด เวลา และกรอกชื่อ-เบอร์โทรศัพท์ให้ครบถ้วน
-            </p>
+          {/* Confirm or Login Button */}
+          {!isLoggedIn ? (
+            <button
+              id="btn-login-to-book"
+              type="button"
+              onClick={handleLineLogin}
+              className="w-full h-14 min-h-[48px] rounded-2xl font-bold text-sm bg-[#06C755] hover:bg-[#05b34c] text-white flex items-center justify-center space-x-2 transition-all duration-200 shadow-md cursor-pointer active:scale-[0.99]"
+            >
+              <img
+                src="https://upload.wikimedia.org/wikipedia/commons/4/41/LINE_logo.svg"
+                alt="LINE"
+                className="w-5 h-5 shrink-0"
+              />
+              <span>เข้าสู่ระบบด้วย LINE เพื่อทำการจอง</span>
+            </button>
+          ) : (
+            <button
+              id="btn-confirm-booking"
+              type="button"
+              disabled={!isFormValid || isSubmitting}
+              onClick={handleBookingSubmit}
+              className={`w-full h-14 min-h-[48px] rounded-2xl font-semibold text-base flex items-center justify-center space-x-2 transition-all duration-200 shadow-md ${
+                isFormValid && !isSubmitting
+                  ? 'bg-[#D4A373] hover:bg-[#c49261] text-white active:scale-[0.99] cursor-pointer'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
+              }`}
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+                  <span>กำลังบันทึกคิวของคุณ...</span>
+                </>
+              ) : (
+                <>
+                  <span>จองเลย</span>
+                  <ArrowRight className="w-5 h-5 ml-1" />
+                </>
+              )}
+            </button>
           )}
+
+          {!isLoggedIn ? (
+            <p className="text-[11px] text-[#06C755] font-semibold text-center mt-2 flex items-center justify-center gap-1">
+              <span>* กรุณาเข้าสู่ระบบด้วย LINE ก่อนทำการจองคิว</span>
+            </p>
+          ) : !isFormValid ? (
+            <p className="text-[11px] text-gray-400 text-center mt-2">
+              * กรุณาเลือกบริการ ช่าง วันนัด เวลา และกรอกเบอร์โทรศัพท์ให้ครบถ้วน
+            </p>
+          ) : null}
         </section>
 
         {/* Footer info */}
@@ -1475,17 +1531,40 @@ export default function App() {
               )}
             </div>
 
-            {/* Bookings List */}
+            {/* Bookings List or Login Prompt */}
             <div className="p-4 overflow-y-auto space-y-3 flex-1">
-              {loadingBookings ? (
+              {!isLoggedIn && !searchPhone ? (
+                <div className="py-10 px-4 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
+                    <Lock className="w-7 h-7 stroke-[1.5]" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-900 text-sm">เข้าสู่ระบบเพื่อดูคิวของคุณ</h4>
+                    <p className="text-xs text-gray-500 mt-1 max-w-xs mx-auto leading-relaxed">
+                      เพื่อความเป็นส่วนตัว กรุณาเข้าสู่ระบบด้วย LINE หรือค้นหาด้วยเบอร์โทรศัพท์ที่เคยใช้จอง
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleLineLogin}
+                    className="px-5 py-2.5 bg-[#06C755] hover:bg-[#05b34c] text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                  >
+                    <img
+                      src="https://upload.wikimedia.org/wikipedia/commons/4/41/LINE_logo.svg"
+                      alt="LINE"
+                      className="w-4 h-4"
+                    />
+                    <span>เข้าสู่ระบบด้วย LINE</span>
+                  </button>
+                </div>
+              ) : loadingBookings ? (
                 <div className="py-8 text-center text-gray-400">
                   <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D4A373]" />
-                  <p className="text-xs">กำลังโหลดข้อมูลคิว...</p>
+                  <p className="text-xs">กำลังโหลดข้อมูลคิวของคุณ...</p>
                 </div>
               ) : allBookings.length === 0 ? (
                 <div className="py-8 text-center text-gray-400">
                   <CalendarCheck2 className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                  <p className="text-xs">ยังไม่มีรายการจองในระบบ</p>
+                  <p className="text-xs">คุณยังไม่มีรายการจองในระบบ</p>
                 </div>
               ) : (
                 allBookings.map((b) => (
@@ -1530,7 +1609,7 @@ export default function App() {
                       {b.status !== 'cancelled' && (
                         <button
                           onClick={() => handleCancelBooking(b.id)}
-                          className="text-rose-500 hover:text-rose-700 text-[11px] underline"
+                          className="text-rose-500 hover:text-rose-700 text-[11px] underline cursor-pointer"
                         >
                           ยกเลิกคิว
                         </button>
