@@ -544,12 +544,12 @@ export default function App() {
         staffId: selectedStaffId,
         date: selectedDate,
         time: selectedTime,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        specialRequest: specialRequest.trim(),
-        customerEmail: customerEmail?.trim() || null,
+        customerName: String(customerName || '').trim(),
+        customerPhone: String(customerPhone || '').trim(),
+        specialRequest: String(specialRequest || '').trim(),
+        customerEmail: customerEmail ? String(customerEmail).trim() : null,
         slipBase64: slipBase64 || null,
-        paymentStatus: payLater ? 'unpaid' : (slipBase64 ? 'paid_slip' : 'unpaid'),
+        paymentStatus: 'paid_slip',
         lineUserId: lineProfile?.userId || null,
         lineDisplayName: lineProfile?.displayName || null,
       };
@@ -565,9 +565,9 @@ export default function App() {
         localStorage.setItem(
           `bloom_user_${lineProfile.userId}`,
           JSON.stringify({
-            name: customerName.trim(),
-            phone: customerPhone.trim(),
-            email: customerEmail?.trim() || '',
+            name: String(customerName || '').trim(),
+            phone: String(customerPhone || '').trim(),
+            email: customerEmail ? String(customerEmail).trim() : '',
           })
         );
       }
