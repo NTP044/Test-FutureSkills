@@ -221,6 +221,25 @@ export default function AdminPanel({ isOpen, onClose, onLogout }) {
     };
   }, [isOpen]);
 
+  // Auto-refresh when user switches back to browser or unlocks mobile screen
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadAllAdminData();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [isOpen]);
+
   const handlePushAllToSheet = async () => {
     setIsPushing(true);
     setSyncSuccessMsg('');
